@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 #[cfg(feature = "timings")]
 #[inline]
@@ -18,19 +18,9 @@ pub fn timed<R>(_: &str, f: impl FnOnce() -> R) -> R {
 
 #[inline]
 pub fn always_timed<R>(name: &str, f: impl FnOnce() -> R) -> R {
-    println!("{} ...", name);
+    println!(":: {}...", name);
     let t = SystemTime::now();
     let r = f();
-    println!("... {:?}", t.elapsed());
+    println!("   {:?}", t.elapsed().unwrap());
     r
-}
-
-#[inline]
-pub fn elapsed<R>(name: &str, f: impl FnOnce() -> R) -> Duration {
-    println!("{} ...", name);
-    let t = SystemTime::now();
-    let _ = f();
-    let elapsed = t.elapsed().unwrap();
-    println!("... {:?}", elapsed);
-    elapsed
 }

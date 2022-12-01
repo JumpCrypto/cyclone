@@ -1,6 +1,6 @@
 use cyclone_msm::{
     always_timed, harness_digits, load_beta, load_points, preprocess::into_weierstrass, timed, App,
-    Instruction,
+    Cmd,
 };
 use fpga::{SendBuffer64, F1};
 
@@ -22,23 +22,22 @@ fn main() {
 
     let point = always_timed("column sum", || {
         if args.verbose {
-            app.print_stats();
+            println!("{:?}", app.statistics());
         }
-        app.start();
 
-        let mut cmds = SendBuffer64::default();
+        use fpga::Stream;
+        let mut stream = app.start();
+
+        let mut packet = SendBuffer64::default();
         for chunk in digits.chunks(8) {
-            for (digit, cmd) in chunk.iter().zip(cmds.iter_mut()) {
-                *cmd = Instruction::new(*digit as i16);
+            for (digit, cmd) in chunk.iter().zip(packet.iter_mut()) {
+                *cmd = Cmd::set_digit(*digit);
             }
-            app.update(&cmds);
+            stream.write(&packet);
         }
-        app.flush();
 
-        let register_point = app.get_point_register();
-        let dma_point = app.get_point_dma();
-        assert_eq!(register_point, dma_point);
-        into_weierstrass(&dma_point)
+        let point = app.get_point();
+        into_weierstrass(&point)
     });
 
     if point != sum {

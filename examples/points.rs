@@ -2,8 +2,6 @@ use ark_bls12_377::Fr;
 use cyclone_msm::timed;
 use cyclone_msm::{harness_points, load, load_slice, store, store_slice, G1PTEAffine};
 
-// use msm_fpga::*;
-
 fn main() {
     let size = std::env::args()
         .nth(1)
@@ -31,5 +29,6 @@ fn main() {
     store_slice(&points, &points_name);
     let mut points_load = vec![G1PTEAffine::zero(); len];
     timed("loading", || load_slice(&mut points_load, &points_name));
-    assert_eq!(points, points_load);
+    let equal = points == points_load;
+    assert!(equal);
 }

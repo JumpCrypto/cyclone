@@ -1,12 +1,17 @@
-use core::fmt;
+use core::iter;
 
-use ark_bls12_377::{G1Affine, G1TEProjective};
+use ark_bls12_377::{Fq, G1Affine, G1TEProjective};
 use ark_std::Zero;
 // use our_ff::{FromBytes, ToBytes};
 
-use fpga::{Fpga, ReceiveBuffer, SendBuffer64 as SendBuffer};
+use fpga::{
+    f1::Stream as F1Stream, Fpga, SendBuffer64 as SendBuffer, Stream as _, Streamable as _, F1,
+};
 
-use crate::{digits::single_digit_carry, limb_carries, timed, G1PTEAffine, G1Projective, Scalar};
+use crate::{
+    digits::single_digit_carry, limb_carries, preprocess::into_weierstrass, timed, G1PTEAffine,
+    G1Projective, Scalar,
+};
 
 const DDR_READ_LEN: u32 = 64;
 
@@ -15,7 +20,8 @@ const FIRST_BUCKET: u32 = 0;
 const LAST_BUCKET: u32 = NUM_BUCKETS - 1;
 
 const BACKOFF_THRESHOLD: u32 = 64;
-const FLUSH_BACKOFF_EVERY: usize = 512;
+const SET_POINTS_FLUSH_EVERY: usize = 1024;
+const SET_DIGITS_FLUSH_BACKOFF_EVERY: usize = 512;
 
 fn shl_assign(point: &mut G1TEProjective, c: usize) {
     use ark_ec::Group;
@@ -25,34 +31,87 @@ fn shl_assign(point: &mut G1TEProjective, c: usize) {
 }
 
 #[repr(usize)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 /// Top-level commands of the FPGA App's interface.
-/// Of more interest are the subcommands of `Cmd::Msm` in [`Command`].
-pub enum Cmd {
+/// Of more interest are the subcommands of `Stream::Msm` in [`Command`].
+pub enum Stream {
     SetX = 1 << 26,
     SetY = 2 << 26,
-    SetZ = 3 << 26,
-    // family of subcommands, packed + encoded in the payload
+    SetKT = 3 << 26,
+    // must start with Cmd::Start, then packets of Cmd::SetDigit
     Msm = 4 << 26,
     SetZero = 5 << 26,
 }
 
+#[repr(u64)]
+pub enum Cmd {
+    Start = 1,
+    SetDigit = 3,
+}
+
 impl Cmd {
-    pub fn addr(self, addr: usize) -> usize {
-        self as usize | addr
+    #[inline(always)]
+    pub fn set_digit(digit: i16) -> u64 {
+        Cmd::SetDigit as u64 | (digit as u16 as u64) << 14
     }
 }
 
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum WriteRegister {
+    // parametrised read registers Statistic, X, Y, Z need a preceding query with the parameter
+    Query = 0x10,
+    DdrReadLen = 0x11,
+    MsmLength = 0x20,
+    LastBucket = 0x21,
+    FirstBucket = 0x22,
+}
+
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ReadRegister {
+    Statistic = 0x20,
+    DigitsQueue = 0x21,
+    Aggregated = 0x30,
+    X = 0x31,
+    Y = 0x32,
+    Z = 0x33,
+    T = 0x34,
+}
+
+#[repr(u32)]
+// TODO: double check these are named correctly
+pub enum Statistic {
+    DroppedCommands = 0,
+    DdrReadMiss = 1,
+    DdrWriteMiss = 2,
+    DdrPushCount = 3,
+    DdrReadCountChannel1 = 4,
+    DdrReadCountChannel2 = 5,
+    DdrReadCountChannel3 = 6,
+}
+
+#[derive(Copy, Clone, Debug)]
+// TODO: double check these are named correctly
+pub struct Statistics {
+    pub dropped_commands: u32,
+    pub ddr_read_miss: u32,
+    pub ddr_write_miss: u32,
+    pub ddr_push_count: u32,
+    pub ddr_read_count_channel_1: u32,
+    pub ddr_read_count_channel_2: u32,
+    pub ddr_read_count_channel_3: u32,
+}
+
 pub struct App {
-    pub fpga: fpga::F1,
+    pub fpga: F1,
     len: usize,
-    cmd_addr: usize,
     pool: Option<rayon::ThreadPool>,
     carried: Option<Vec<Scalar>>,
 }
 
 impl App {
-    pub fn new(fpga: fpga::F1, size: u8) -> Self {
+    pub fn new(fpga: F1, size: u8) -> Self {
         assert!(size < 32);
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
@@ -61,7 +120,6 @@ impl App {
         let mut app = App {
             fpga,
             len: 1 << size,
-            cmd_addr: 0,
             pool: Some(pool),
             carried: Some(vec![Scalar::default(); 1 << size]),
         };
@@ -74,6 +132,29 @@ impl App {
         app
     }
 
+    #[inline]
+    fn column(&mut self, i: usize, scalars: &[Scalar], total: &mut G1TEProjective) {
+        let mut cmds = SendBuffer::default();
+        for j in (0..4).rev() {
+            timed(&format!("\n:: column {}", j as usize), || {
+                let mut stream = self.start();
+
+                for chunk in scalars.chunks(8) {
+                    for (cmd, scalar) in cmds.iter_mut().zip(chunk) {
+                        let digit = single_digit_carry(scalar, i, j);
+                        *cmd = Cmd::set_digit(digit);
+                    }
+                    stream.write(&cmds);
+                }
+
+                *total += timed("fetching point", || self.get_point());
+                if (i, j) != (0, 0) {
+                    shl_assign(total, 16);
+                }
+            });
+        }
+    }
+
     /// Perform full MSM.
     #[inline]
     pub fn msm(&mut self, scalars: &[Scalar]) -> G1Projective {
@@ -82,7 +163,6 @@ impl App {
         let pool = self.pool.take().unwrap_or_else(|| unreachable!());
         let mut carried = self.carried.take().unwrap_or_else(|| unreachable!());
 
-        let mut cmds = SendBuffer::default();
         let mut total = G1TEProjective::zero();
         let mut total0 = G1TEProjective::zero();
         pool.scope(|s| {
@@ -91,57 +171,18 @@ impl App {
             });
 
             s.spawn(|_| {
-                for j in (0..4).rev() {
-                    timed(&format!("\n:: column {}", j as usize), || {
-                        self.start();
-
-                        for chunk in scalars.chunks(8) {
-                            for (cmd, scalar) in cmds.iter_mut().zip(chunk) {
-                                let digit = single_digit_carry(scalar, 0, j);
-                                *cmd = Instruction::new(digit);
-                            }
-                            self.update(&cmds);
-                        }
-
-                        self.flush();
-
-                        total0 += timed("fetching point", || self.get_point());
-                        if j != 0 {
-                            // total0 <<= 16;
-                            shl_assign(&mut total0, 16);
-                        }
-                    });
-                }
+                self.column(0, scalars, &mut total0);
             });
         });
 
         for i in (1..4).rev() {
-            for j in (0..4).rev() {
-                timed(&format!("\n:: column {}", i * 4 + j as usize), || {
-                    self.start();
-
-                    for chunk in carried.chunks(8) {
-                        for (cmd, scalar) in cmds.iter_mut().zip(chunk) {
-                            let digit = single_digit_carry(scalar, i, j);
-                            *cmd = Instruction::new(digit);
-                        }
-                        self.update(&cmds);
-                    }
-
-                    self.flush();
-
-                    total += timed("fetching point", || self.get_point());
-                    // total <<= 16;
-                    shl_assign(&mut total, 16);
-                });
-            }
+            self.column(i, &carried, &mut total);
         }
 
-        // total <<= 48;
         shl_assign(&mut total, 48);
         total += total0;
 
-        let total = crate::preprocess::into_weierstrass(&total);
+        let total = into_weierstrass(&total);
         self.pool = Some(pool);
         self.carried = Some(carried);
         total
@@ -159,382 +200,165 @@ impl App {
         let zero = G1TEProjective::zero();
         let mut buffer = SendBuffer::default();
 
+        let mut stream: F1Stream<'_, SetPointsBackoff> = self.fpga.stream(Stream::SetZero as _);
+
         buffer[..6].copy_from_slice(zero.x.0.as_ref());
-        self.fpga.write64(Cmd::SetZero.addr(0), &buffer);
+        stream.write(&buffer);
         buffer[..6].copy_from_slice(zero.y.0.as_ref());
-        self.fpga.write64(Cmd::SetZero.addr(1), &buffer);
+        stream.write(&buffer);
         buffer[..6].copy_from_slice(zero.z.0.as_ref());
-        self.fpga.write64(Cmd::SetZero.addr(2), &buffer);
+        stream.write(&buffer);
         buffer[..6].copy_from_slice(zero.t.0.as_ref());
-        self.fpga.write64(Cmd::SetZero.addr(3), &buffer);
+        stream.write(&buffer);
 
         self.fpga.flush();
     }
 
     fn set_size(&mut self) {
-        self.fpga.write_register(0x20, self.len as _);
+        self.fpga
+            .write_register(WriteRegister::MsmLength as _, self.len as _);
     }
 
     fn set_last_bucket(&mut self) {
-        self.fpga.write_register(0x21, LAST_BUCKET);
+        self.fpga
+            .write_register(WriteRegister::LastBucket as _, LAST_BUCKET);
     }
 
     fn set_first_bucket(&mut self) {
-        self.fpga.write_register(0x22, FIRST_BUCKET);
+        self.fpga
+            .write_register(WriteRegister::FirstBucket as _, FIRST_BUCKET);
     }
 
     fn set_ddr_read_len(&mut self) {
-        self.fpga.write_register(0x11, DDR_READ_LEN);
+        self.fpga
+            .write_register(WriteRegister::DdrReadLen as _, DDR_READ_LEN);
     }
 
     #[inline]
-    fn set_point(&mut self, point: &G1PTEAffine, index: usize) {
+    fn set_coordinates(&mut self, coordinate: Stream, coordinates: impl Iterator<Item = Fq>) {
+        debug_assert!([
+            coordinate == Stream::SetX,
+            coordinate == Stream::SetY,
+            coordinate == Stream::SetKT
+        ]
+        .iter()
+        .any(|&condition| condition));
         let mut buffer = SendBuffer::default();
-
-        // NB: Use `point.{x,y,kt}.0` for the Montgomery representation,
-        // TODO: double check
-        buffer[..6].copy_from_slice(point.x.0.as_ref());
-        self.fpga.write64(Cmd::SetX.addr(index), &buffer);
-
-        buffer[..6].copy_from_slice(point.y.0.as_ref());
-        self.fpga.write64(Cmd::SetY.addr(index), &buffer);
-
-        buffer[..6].copy_from_slice(point.kt.0.as_ref());
-        self.fpga.write64(Cmd::SetZ.addr(index), &buffer);
+        let mut stream: F1Stream<'_, SetPointsBackoff> = self.fpga.stream(coordinate as _);
+        for coordinate in coordinates {
+            buffer[..6].copy_from_slice(coordinate.0.as_ref());
+            stream.write(&buffer);
+        }
     }
-
     #[inline]
     pub fn set_preprocessed_points(&mut self, points: &[G1PTEAffine]) {
         assert!(self.len == points.len());
 
-        let mut index = 0;
-        let bar = indicatif::ProgressBar::new(self.len as _);
-        const CHUNK: usize = 1024;
-        for chunk in points.chunks(CHUNK) {
-            for point in chunk.iter() {
-                self.set_point(point, index);
-                index += 1;
-            }
-            bar.inc(CHUNK as _);
-
-            // flush from time to time
-            self.fpga.flush();
-        }
+        self.set_coordinates(Stream::SetX, points.iter().map(|point| point.x));
+        self.set_coordinates(Stream::SetY, points.iter().map(|point| point.y));
+        self.set_coordinates(Stream::SetKT, points.iter().map(|point| point.kt));
     }
 
     pub fn set_points(&mut self, points: &[G1Affine]) {
         assert!(self.len == points.len());
-
-        let mut index = 0;
-        let bar = indicatif::ProgressBar::new(self.len as _);
-        const CHUNK: usize = 1024;
-        for chunk in points.chunks(CHUNK) {
-            for point in chunk.iter() {
-                self.set_point(&point.into(), index);
-                index += 1;
-            }
-            bar.inc(CHUNK as _);
-
-            // flush from time to time
-            self.fpga.flush();
-        }
+        let preprocessed_points: Vec<_> = points.iter().map(|point| point.into()).collect();
+        self.set_preprocessed_points(&preprocessed_points);
     }
 
     pub fn set_preprocessed_point_repeatedly(&mut self, point: &G1PTEAffine) {
-        let mut index = 0;
-        let bar = indicatif::ProgressBar::new(self.len as _);
-        const CHUNK: usize = 256;
-        for _ in (0..self.len).step_by(CHUNK) {
-            for _ in 0..CHUNK {
-                self.set_point(point, index);
-                index += 1;
-            }
-            bar.inc(CHUNK as u64);
-
-            // flush from time to time
-            self.fpga.flush();
-        }
+        self.set_coordinates(Stream::SetX, iter::repeat(point.x).take(self.len));
+        self.set_coordinates(Stream::SetY, iter::repeat(point.y).take(self.len));
+        self.set_coordinates(Stream::SetKT, iter::repeat(point.kt).take(self.len));
     }
 
-    fn get_coordinate(&mut self, i: u32) -> [u64; 6] {
+    fn get_coordinate(&mut self, coordinate: ReadRegister) -> Fq {
+        debug_assert!([
+            coordinate == ReadRegister::X,
+            coordinate == ReadRegister::Y,
+            coordinate == ReadRegister::Z,
+            coordinate == ReadRegister::T,
+        ]
+        .iter()
+        .any(|&condition| condition));
         let mut buffer = [0u64; 6];
         for j in (0..12).step_by(2) {
-            self.fpga.write_register(0x10, j);
-            let lo = self.fpga.read_register(0x31 + i);
+            self.fpga.write_register(WriteRegister::Query as _, j);
+            let lo = self.fpga.read_register(coordinate as _);
 
-            self.fpga.write_register(0x10, j + 1);
-            let hi = self.fpga.read_register(0x31 + i);
+            self.fpga.write_register(WriteRegister::Query as _, j + 1);
+            let hi = self.fpga.read_register(coordinate as _);
 
             // | has lower precedence than <<, whereas + has higher
             // and would need parentheses
             buffer[j as usize / 2] = (hi as u64) << 32 | lo as u64;
         }
-        // print!("got coordinate: ");//, &buffer);
-        // for entry in buffer.iter() {
-        //     print!("{} ", hex::encode(entry.to_le_bytes()));
-        // }
-        // println!();
-        buffer
-    }
-
-    pub fn get_point_register(&mut self) -> G1TEProjective {
-        let mut point = G1TEProjective::zero();
-        loop {
-            let reg = self.fpga.read_register(0x30);
-            if reg != 0 {
-                // println!("nzr = {}", reg);
-                break;
-            } else {
-                // println!("reg = {}", reg);
-            }
-        }
-        // TODO: remove the sleep once the image is fixed
-        std::thread::sleep(std::time::Duration::from_millis(40));
-        point.x.0.as_mut().copy_from_slice(&self.get_coordinate(0));
-        point.y.0.as_mut().copy_from_slice(&self.get_coordinate(1));
-        point.z.0.as_mut().copy_from_slice(&self.get_coordinate(2));
-        point.t.0.as_mut().copy_from_slice(&self.get_coordinate(3));
-
-        point
+        ark_ff::BigInt(buffer).into()
     }
 
     pub fn get_point(&mut self) -> G1TEProjective {
-        self.get_point_register()
-    }
+        self.fpga.flush();
+        while 0 == self.fpga.read_register(ReadRegister::Aggregated as _) {
+            continue;
+        }
 
-    pub fn get_point_dma(&mut self) -> G1TEProjective {
-        let mut buffer = ReceiveBuffer::default();
-        #[allow(unused_mut)]
         let mut point = G1TEProjective::zero();
-
-        #[cfg(feature = "hw")]
-        {
-            self.fpga.read(&mut buffer);
-            point
-                .x
-                .0
-                .as_mut()
-                .copy_from_slice(&buffer.as_u64_slice()[..6]);
-
-            self.fpga.read(&mut buffer);
-            point
-                .y
-                .0
-                .as_mut()
-                .copy_from_slice(&buffer.as_u64_slice()[..6]);
-
-            self.fpga.read(&mut buffer);
-            point
-                .z
-                .0
-                .as_mut()
-                .copy_from_slice(&buffer.as_u64_slice()[..6]);
-
-            self.fpga.read(&mut buffer);
-            point
-                .t
-                .0
-                .as_mut()
-                .copy_from_slice(&buffer.as_u64_slice()[..6]);
-        }
-        #[cfg(not(feature = "hw"))]
-        {
-            self.fpga.receive(&mut buffer);
-            self.fpga.receive(&mut buffer);
-            self.fpga.receive(&mut buffer);
-            self.fpga.receive(&mut buffer);
-        }
+        point.x = self.get_coordinate(ReadRegister::X);
+        point.y = self.get_coordinate(ReadRegister::Y);
+        point.z = self.get_coordinate(ReadRegister::Z);
+        point.t = self.get_coordinate(ReadRegister::T);
 
         point
     }
 
-    pub fn flush(&self) {
-        self.fpga.flush()
-    }
-
-    pub fn backoff(&mut self) {
-        let mut show = true;
-        let mut back = self.fpga.read_register(0x21);
-        while back > BACKOFF_THRESHOLD {
-            if show {
-                // println!("backing off at {} cmd {}", back, self.cmd_addr & ((1 << 26) - 1));
-                // self.print_stats();
-            }
-            show = false;
-            back = self.fpga.read_register(0x21);
-            continue;
+    pub fn statistics(&mut self) -> Statistics {
+        use Statistic::*;
+        Statistics {
+            dropped_commands: self.statistic(DroppedCommands),
+            ddr_read_miss: self.statistic(DdrReadMiss),
+            ddr_write_miss: self.statistic(DdrWriteMiss),
+            ddr_push_count: self.statistic(DdrPushCount),
+            ddr_read_count_channel_1: self.statistic(DdrReadCountChannel1),
+            ddr_read_count_channel_2: self.statistic(DdrReadCountChannel2),
+            ddr_read_count_channel_3: self.statistic(DdrReadCountChannel3),
         }
     }
 
-    pub fn print_stats(&mut self) {
-        println!("dropped cmds    = {}", self.missed());
-        println!("DDR read miss   = {}", self.bubbles());
-        println!("DDR write miss  = {}", self.register(2));
-        // DDR push count
-        println!("reg[3]          = {}", self.register(3));
-        // DDR read count (all channels)
-        println!("reg[4]          = {}", self.register(4));
-        println!("reg[5]          = {}", self.register(5));
-        println!("reg[6]          = {}", self.register(6));
-        // println!("reg[7]          = {}", self.register(7));
-        // println!("reg[8]          = {}", self.register(8));
+    pub fn statistic(&mut self, statistic: Statistic) -> u32 {
+        self.fpga
+            .write_register(WriteRegister::Query as _, statistic as _);
+        self.fpga.read_register(ReadRegister::Statistic as _)
     }
 
-    pub fn register(&mut self, reg: u32) -> u32 {
-        self.fpga.write_register(0x10, reg);
-        self.fpga.read_register(0x20)
-    }
+    pub fn start(&mut self) -> F1Stream<'_, DigitsBackoff> {
+        let mut stream = self.fpga.stream(Stream::Msm as _);
 
-    // DDR not taking fast enough
-    pub fn something(&mut self) -> u32 {
-        self.fpga.write_register(0x10, 2);
-        self.fpga.read_register(0x20)
-    }
-
-    // DDR not responding fast enough
-    pub fn bubbles(&mut self) -> u32 {
-        self.fpga.write_register(0x10, 1);
-        self.fpga.read_register(0x20)
-    }
-
-    // dropped commands
-    pub fn missed(&mut self) -> u32 {
-        self.fpga.write_register(0x10, 0);
-        self.fpga.read_register(0x20)
-    }
-
-    pub fn start(&mut self) {
-        self.cmd_addr = 4 << 26;
         let mut cmds = SendBuffer::default();
-        cmds[0] = 1;
-        self.fpga.write64(self.cmd_addr, &cmds);
-        self.fpga.flush();
-        self.cmd_addr += 1;
+        cmds[0] = Cmd::Start as _;
+        stream.write(&cmds);
+        stream.flush();
+        stream
     }
+}
 
-    #[inline]
-    pub fn update(&mut self, commands: &SendBuffer) {
-        self.fpga.write64(self.cmd_addr, commands);
-        self.cmd_addr += 1;
-
-        if (self.cmd_addr & (FLUSH_BACKOFF_EVERY - 1)) == 0 {
-            self.fpga.flush();
-            self.backoff();
+pub struct SetPointsBackoff;
+impl fpga::Backoff<F1> for SetPointsBackoff {
+    #[inline(always)]
+    fn backoff(fpga: &mut F1, offset: usize) {
+        if (offset % SET_POINTS_FLUSH_EVERY) == 0 {
+            fpga.flush();
         }
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct Instruction {
-    pub point: u32,
-    pub process: bool,
-    pub sram: u16,
-    pub negate: bool,
-    pub digit: i16,
-    // pub bucket: u16,
-}
-
-pub struct Command(pub u64);
-
-impl fmt::Debug for Command {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        f.write_fmt(format_args!(
-            "ins {} point {:04} process {} sram {:03X} digit {:04X}",
-            self.0 & 0b111,
-            self.point(),
-            (self.0 >> 29) & 1,
-            self.sram(),
-            self.digit()
-        ))
-    }
-}
-
-impl Command {
-    #[inline]
-    pub fn digit(&self) -> i16 {
-        ((self.0 >> 14) as u16) as i16
-    }
-
-    #[inline]
-    pub fn point(&self) -> u32 {
-        (self.0 >> 31) as _
-    }
-
-    #[inline]
-    pub fn sram(&self) -> u16 {
-        ((self.0 >> 5) as u16) & ((1 << 9) - 1)
-    }
-
-    #[inline]
-    pub fn process(&self) -> bool {
-        (self.0 >> 30) & 1 != 0
-    }
-
-    #[inline]
-    pub fn negate(&self) -> bool {
-        (self.0 >> 4) & 1 != 0
-    }
-
-    #[inline]
-    pub fn ins(&self) -> u8 {
-        self.0 as u8 & ((1 << 4) - 1)
-    }
-}
-
-impl From<u64> for Instruction {
-    fn from(cmd: u64) -> Instruction {
-        let cmd = Command(cmd);
-        Instruction {
-            point: cmd.point(),
-            process: cmd.process(),
-            sram: cmd.sram(),
-            negate: cmd.negate(),
-            digit: cmd.digit(),
+pub struct DigitsBackoff;
+impl fpga::Backoff<F1> for DigitsBackoff {
+    #[inline(always)]
+    fn backoff(fpga: &mut F1, offset: usize) {
+        if (offset % SET_DIGITS_FLUSH_BACKOFF_EVERY) == 0 {
+            fpga.flush();
+            while fpga.read_register(ReadRegister::DigitsQueue as _) > BACKOFF_THRESHOLD {
+                continue;
+            }
         }
-    }
-}
-
-impl Instruction {
-    pub const WASTE_CYCLE: u64 = 4;
-
-    #[inline]
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(digit: i16) -> u64 {
-        3u64 | (digit as u16 as u64) << 14
-    }
-
-    #[inline]
-    pub fn serialize(self) -> u64 {
-        let Instruction {
-            negate,
-            sram,
-            digit,
-            process,
-            point,
-        } = self;
-
-        // bits   len content             model
-        // ----------------------------------------
-        // 0:3    4   command, = 3
-        // 4      1   negate              bool
-        // 5:13   9   SRAM index, 0..512  u16
-        // 14:29  16  signed digit        i16
-        // 30     1   process             bool
-        // 31:63  33  point index         usize
-
-        let mut entry = 3;
-
-        entry |= (negate as u64) << 4;
-
-        debug_assert!(sram < (1 << 9));
-        entry |= (sram as u64) << 5;
-
-        entry |= ((digit as u64) & 0xFFFF_FFFF) << 14;
-
-        entry |= (process as u64) << 30;
-
-        entry |= (point as u64) << 31;
-
-        entry
     }
 }

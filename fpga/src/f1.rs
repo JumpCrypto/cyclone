@@ -1,7 +1,6 @@
-use core::ptr;
 use crate::{Error, Fpga, Result, Write};
 // TODO: improve
-use crate::{ReceiveBuffer, SendBuffer8, SendBuffer64};
+use crate::{Backoff, SendBuffer8, SendBuffer64, Streamable};
 
 pub use fpga_sys as sys;
 
@@ -21,24 +20,6 @@ impl F1 {
 
 #[cfg(feature = "f1")]
 impl Fpga for F1 {
-    fn read(&mut self, buffer: &mut ReceiveBuffer) {
-        // blocking
-        let p = unsafe { sys::dma_wait_512() };
-        // p points to 16 u32s, where the first and the 8th are sequence numbers.
-        for i in 0..7 {
-            buffer[i << 2..][..4].copy_from_slice(
-                unsafe { ptr::read_volatile(p.add(i + 1)) }
-                    .to_le_bytes()
-                    .as_slice(),
-            );
-            buffer[(i + 7) << 2..][..4].copy_from_slice(
-                unsafe { ptr::read_volatile(p.add(i + 9)) }
-                    .to_le_bytes()
-                    .as_slice(),
-            );
-        }
-    }
-
     fn read_register(&self, index: u32) -> u32 {
         let offset = index << 2;
         // println!("reading");
@@ -85,3 +66,32 @@ impl Write<SendBuffer64> for F1 {
         unsafe { sys::write_512_f1(offset as u64, &slice[0] as *const _ as _) };
     }
 }
+
+pub struct Stream<'a, B: Backoff<F1>> {
+    fpga: &'a mut F1,
+    offset: usize,
+    backoff: core::marker::PhantomData<B>,
+}
+
+impl<'a, B: Backoff<F1>> Streamable<'a, Stream<'a, B>, B> for F1 {
+    fn stream(&'a mut self, offset: usize) -> Stream<'a, B> {
+        Stream { fpga: self, offset, backoff: core::marker::PhantomData }
+    }
+}
+
+impl<'a, B: Backoff<F1>> crate::Stream<'a> for Stream<'a, B> {
+    type Packet = SendBuffer64;
+    fn write(&mut self, packet: &Self::Packet) {
+        self.fpga.write64(self.offset, packet);
+        self.offset += 1;
+        B::backoff(&mut self.fpga, self.offset);
+    }
+    // #[inline(always)]
+    fn offset(&self) -> usize {
+        self.offset
+    }
+    fn flush(&mut self) {
+        unsafe { sys::write_flush() };
+    }
+}
+

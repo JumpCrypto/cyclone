@@ -1,5 +1,5 @@
 pub mod app;
-pub use app::{App, Instruction};
+pub use app::{App, Cmd};
 
 pub mod digits;
 pub use digits::{limb_carries, Digit, Limb, Scalar};
@@ -8,7 +8,7 @@ pub mod preprocess;
 pub use preprocess::G1PTEAffine;
 
 pub mod timing;
-pub use timing::{always_timed, elapsed, timed};
+pub use timing::{always_timed, timed};
 
 use ark_bls12_377::{Fr, G1Affine, G1Projective};
 use ark_ec::AffineRepr as _;
@@ -129,8 +129,8 @@ pub fn load_beta(name: &str) -> Fr {
 
 pub fn load_points(size: u8, name: &str) -> Vec<G1PTEAffine> {
     let points_name = format!("{}.points", name);
-    let mut points = vec![G1PTEAffine::zero(); 1 << size];
-    timed("loading", || load_slice(&mut points, &points_name));
+    let mut points = always_timed("allocating points", || vec![G1PTEAffine::zero(); 1 << size]);
+    always_timed("loading points", || load_slice(&mut points, &points_name));
     points
 }
 

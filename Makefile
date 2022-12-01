@@ -2,7 +2,8 @@ SIZE := 16
 # DIR := .
 DIR := /var/tmp/msm
 NAME := $(DIR)/size$(SIZE)
-IMAGE := agfi-0d25a1d127f1b497f
+# IMAGE := agfi-0d25a1d127f1b497f
+IMAGE := agfi-09bec09a9e2b4d332
 
 CARGO := RUSTFLAGS='-C target-cpu=native' ~/.cargo/bin/cargo
 SUDO_CARGO := RUSTFLAGS='-C target-cpu=native' sudo -E ~/.cargo/bin/cargo
@@ -31,7 +32,8 @@ msm-pre: $(NAME).beta
 
 points $(NAME).beta $(NAME).points:
 	mkdir -p $(DIR)
-	$(CARGO) run --release --example points -- $(SIZE) $(NAME)
+	# $(CARGO) run --release --example points -- $(SIZE) $(NAME)
+	$(SUDO_CARGO) run --release --example points -- $(SIZE) $(NAME)
 
 reset:
 	sudo fpga-load-local-image -S 0 -I $(IMAGE)
