@@ -29,9 +29,8 @@ ark-bls12-377 = { version = "0.4.0-alpha.1" }
 ark-std = { version = "0.4.0-alpha", default-features = false }
 
 derivative = "2.2"
-fpga = { path = "fpga" }
+fpga = { path = "fpga", default-features = false }
 hex = "0.4"
-indicatif = "0.17"
 rand_core = { version = "0.6", features = ["getrandom"] }
 rand = "0.8"
 rayon = { version = "1.5.3" }
@@ -39,3 +38,15 @@ seq-macro = "0.3"
 
 [dev-dependencies]
 argh = "0.1"
+
+[[example]]
+name = "add"
+required-features = ["hw"]
+
+[[example]]
+name = "neg"
+required-features = ["hw"]
+
+[[example]]
+name = "sub"
+required-features = ["hw"]

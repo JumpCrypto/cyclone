@@ -1,5 +1,3 @@
-use seq_macro::seq;
-
 pub type Digit = i16;
 pub type Limb = u64;
 pub type Scalar = [Limb; 4];
@@ -142,7 +140,7 @@ pub fn unrolled_signed_digit_16(scalar: &Scalar, i: usize) -> i32 {
     const MAX_SIGNED: u32 = 1 << 15;
     let mut carry = 0u32;
     let mut signed_digit: i32;
-    seq!(j in 0..16 {
+    seq_macro::seq!(j in 0..16 {
         let unsigned_digit = unsigned_digit_16(scalar, j) + carry;
         carry = (unsigned_digit + MAX_SIGNED) >> 16;
         debug_assert!(carry <= 1);

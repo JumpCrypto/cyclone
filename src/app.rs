@@ -2,11 +2,13 @@ use core::iter;
 
 use ark_bls12_377::{Fq, G1Affine, G1TEProjective};
 use ark_std::Zero;
-// use our_ff::{FromBytes, ToBytes};
 
-use fpga::{
-    f1::Stream as F1Stream, Fpga, SendBuffer64 as SendBuffer, Stream as _, Streamable as _, F1,
-};
+use fpga::{null::Backoff as NullBackoff, Flush as _, ReadWrite as _, Streamable as _, Write as _};
+
+#[cfg(not(feature = "hw"))]
+pub use fpga::Null as Fpga;
+#[cfg(feature = "hw")]
+pub use fpga::F1 as Fpga;
 
 use crate::{
     digits::single_digit_carry, limb_carries, preprocess::into_weierstrass, timed, G1PTEAffine,
@@ -23,8 +25,11 @@ const BACKOFF_THRESHOLD: u32 = 64;
 const SET_POINTS_FLUSH_EVERY: usize = 1024;
 const SET_DIGITS_FLUSH_BACKOFF_EVERY: usize = 512;
 
+pub type Packet = fpga::Aligned<[u64; 8]>;
+type FpgaStream<'a, B> = fpga::Stream<'a, Packet, Fpga, B>;
+
 fn shl_assign(point: &mut G1TEProjective, c: usize) {
-    use ark_ec::Group;
+    use ark_ec::Group as _;
     (0..c).for_each(|_| {
         point.double_in_place();
     })
@@ -38,21 +43,21 @@ pub enum Stream {
     SetX = 1 << 26,
     SetY = 2 << 26,
     SetKT = 3 << 26,
-    // must start with Cmd::Start, then packets of Cmd::SetDigit
+    // must start with Command::Start, then packets of Command::SetDigit
     Msm = 4 << 26,
     SetZero = 5 << 26,
 }
 
 #[repr(u64)]
-pub enum Cmd {
-    Start = 1,
+pub enum Command {
+    StartColumn = 1,
     SetDigit = 3,
 }
 
-impl Cmd {
+impl Command {
     #[inline(always)]
     pub fn set_digit(digit: i16) -> u64 {
-        Cmd::SetDigit as u64 | (digit as u16 as u64) << 14
+        Command::SetDigit as u64 | (digit as u16 as u64) << 14
     }
 }
 
@@ -104,14 +109,14 @@ pub struct Statistics {
 }
 
 pub struct App {
-    pub fpga: F1,
+    pub fpga: Fpga,
     len: usize,
     pool: Option<rayon::ThreadPool>,
     carried: Option<Vec<Scalar>>,
 }
 
 impl App {
-    pub fn new(fpga: F1, size: u8) -> Self {
+    pub fn new(fpga: Fpga, size: u8) -> Self {
         assert!(size < 32);
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
@@ -134,15 +139,15 @@ impl App {
 
     #[inline]
     fn column(&mut self, i: usize, scalars: &[Scalar], total: &mut G1TEProjective) {
-        let mut cmds = SendBuffer::default();
+        let mut cmds = Packet::default();
         for j in (0..4).rev() {
             timed(&format!("\n:: column {}", j as usize), || {
-                let mut stream = self.start();
+                let mut stream = self.start_column();
 
                 for chunk in scalars.chunks(8) {
                     for (cmd, scalar) in cmds.iter_mut().zip(chunk) {
                         let digit = single_digit_carry(scalar, i, j);
-                        *cmd = Cmd::set_digit(digit);
+                        *cmd = Command::set_digit(digit);
                     }
                     stream.write(&cmds);
                 }
@@ -158,7 +163,7 @@ impl App {
     /// Perform full MSM.
     #[inline]
     pub fn msm(&mut self, scalars: &[Scalar]) -> G1Projective {
-        assert_eq!(scalars.len(), self.len);
+        assert_eq!(scalars.len(), self.len as _);
 
         let pool = self.pool.take().unwrap_or_else(|| unreachable!());
         let mut carried = self.carried.take().unwrap_or_else(|| unreachable!());
@@ -198,40 +203,40 @@ impl App {
 
     fn set_zero(&mut self) {
         let zero = G1TEProjective::zero();
-        let mut buffer = SendBuffer::default();
+        let mut packet = Packet::default();
 
-        let mut stream: F1Stream<'_, SetPointsBackoff> = self.fpga.stream(Stream::SetZero as _);
+        let mut stream: FpgaStream<'_, NullBackoff> = self.fpga.stream(Stream::SetZero as _);
 
-        buffer[..6].copy_from_slice(zero.x.0.as_ref());
-        stream.write(&buffer);
-        buffer[..6].copy_from_slice(zero.y.0.as_ref());
-        stream.write(&buffer);
-        buffer[..6].copy_from_slice(zero.z.0.as_ref());
-        stream.write(&buffer);
-        buffer[..6].copy_from_slice(zero.t.0.as_ref());
-        stream.write(&buffer);
+        packet[..6].copy_from_slice(zero.x.0.as_ref());
+        stream.write(&packet);
+        packet[..6].copy_from_slice(zero.y.0.as_ref());
+        stream.write(&packet);
+        packet[..6].copy_from_slice(zero.z.0.as_ref());
+        stream.write(&packet);
+        packet[..6].copy_from_slice(zero.t.0.as_ref());
+        stream.write(&packet);
 
         self.fpga.flush();
     }
 
     fn set_size(&mut self) {
         self.fpga
-            .write_register(WriteRegister::MsmLength as _, self.len as _);
+            .write(WriteRegister::MsmLength as _, &(self.len as u32));
     }
 
     fn set_last_bucket(&mut self) {
         self.fpga
-            .write_register(WriteRegister::LastBucket as _, LAST_BUCKET);
+            .write(WriteRegister::LastBucket as _, &LAST_BUCKET);
     }
 
     fn set_first_bucket(&mut self) {
         self.fpga
-            .write_register(WriteRegister::FirstBucket as _, FIRST_BUCKET);
+            .write(WriteRegister::FirstBucket as _, &FIRST_BUCKET);
     }
 
     fn set_ddr_read_len(&mut self) {
         self.fpga
-            .write_register(WriteRegister::DdrReadLen as _, DDR_READ_LEN);
+            .write(WriteRegister::DdrReadLen as _, &DDR_READ_LEN);
     }
 
     #[inline]
@@ -243,11 +248,11 @@ impl App {
         ]
         .iter()
         .any(|&condition| condition));
-        let mut buffer = SendBuffer::default();
-        let mut stream: F1Stream<'_, SetPointsBackoff> = self.fpga.stream(coordinate as _);
+        let mut packet = Packet::default();
+        let mut stream: FpgaStream<'_, SetPointsBackoff> = self.fpga.stream(coordinate as _);
         for coordinate in coordinates {
-            buffer[..6].copy_from_slice(coordinate.0.as_ref());
-            stream.write(&buffer);
+            packet[..6].copy_from_slice(coordinate.0.as_ref());
+            stream.write(&packet);
         }
     }
     #[inline]
@@ -271,6 +276,7 @@ impl App {
         self.set_coordinates(Stream::SetKT, iter::repeat(point.kt).take(self.len));
     }
 
+    #[cfg(feature = "hw")]
     fn get_coordinate(&mut self, coordinate: ReadRegister) -> Fq {
         debug_assert!([
             coordinate == ReadRegister::X,
@@ -282,11 +288,11 @@ impl App {
         .any(|&condition| condition));
         let mut buffer = [0u64; 6];
         for j in (0..12).step_by(2) {
-            self.fpga.write_register(WriteRegister::Query as _, j);
-            let lo = self.fpga.read_register(coordinate as _);
+            self.fpga.write(WriteRegister::Query as _, &j);
+            let lo = self.fpga.read(coordinate as _);
 
-            self.fpga.write_register(WriteRegister::Query as _, j + 1);
-            let hi = self.fpga.read_register(coordinate as _);
+            self.fpga.write(WriteRegister::Query as _, &(j + 1));
+            let hi = self.fpga.read(coordinate as _);
 
             // | has lower precedence than <<, whereas + has higher
             // and would need parentheses
@@ -295,9 +301,10 @@ impl App {
         ark_ff::BigInt(buffer).into()
     }
 
+    #[cfg(feature = "hw")]
     pub fn get_point(&mut self) -> G1TEProjective {
         self.fpga.flush();
-        while 0 == self.fpga.read_register(ReadRegister::Aggregated as _) {
+        while 0 == self.fpga.read(ReadRegister::Aggregated as _) {
             continue;
         }
 
@@ -308,6 +315,11 @@ impl App {
         point.t = self.get_coordinate(ReadRegister::T);
 
         point
+    }
+
+    #[cfg(not(feature = "hw"))]
+    pub fn get_point(&mut self) -> G1TEProjective {
+        G1TEProjective::zero()
     }
 
     pub fn statistics(&mut self) -> Statistics {
@@ -325,25 +337,25 @@ impl App {
 
     pub fn statistic(&mut self, statistic: Statistic) -> u32 {
         self.fpga
-            .write_register(WriteRegister::Query as _, statistic as _);
-        self.fpga.read_register(ReadRegister::Statistic as _)
+            .write(WriteRegister::Query as _, &(statistic as u32));
+        self.fpga.read(ReadRegister::Statistic as _)
     }
 
-    pub fn start(&mut self) -> F1Stream<'_, DigitsBackoff> {
+    pub fn start_column(&mut self) -> FpgaStream<'_, DigitsBackoff> {
         let mut stream = self.fpga.stream(Stream::Msm as _);
 
-        let mut cmds = SendBuffer::default();
-        cmds[0] = Cmd::Start as _;
-        stream.write(&cmds);
+        let mut packet = Packet::default();
+        packet[0] = Command::StartColumn as _;
+        stream.write(&packet);
         stream.flush();
         stream
     }
 }
 
 pub struct SetPointsBackoff;
-impl fpga::Backoff<F1> for SetPointsBackoff {
+impl fpga::Backoff<Fpga, usize> for SetPointsBackoff {
     #[inline(always)]
-    fn backoff(fpga: &mut F1, offset: usize) {
+    fn backoff(fpga: &mut Fpga, offset: usize) {
         if (offset % SET_POINTS_FLUSH_EVERY) == 0 {
             fpga.flush();
         }
@@ -351,12 +363,12 @@ impl fpga::Backoff<F1> for SetPointsBackoff {
 }
 
 pub struct DigitsBackoff;
-impl fpga::Backoff<F1> for DigitsBackoff {
+impl fpga::Backoff<Fpga, usize> for DigitsBackoff {
     #[inline(always)]
-    fn backoff(fpga: &mut F1, offset: usize) {
+    fn backoff(fpga: &mut Fpga, offset: usize) {
         if (offset % SET_DIGITS_FLUSH_BACKOFF_EVERY) == 0 {
             fpga.flush();
-            while fpga.read_register(ReadRegister::DigitsQueue as _) > BACKOFF_THRESHOLD {
+            while fpga.read(ReadRegister::DigitsQueue as _) > BACKOFF_THRESHOLD {
                 continue;
             }
         }

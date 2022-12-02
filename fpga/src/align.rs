@@ -1,7 +1,5 @@
 use core::ops::{Deref, DerefMut};
 
-use crate::{SendBuffer8, SendBuffer64};
-
 #[repr(align(64))]
 #[derive(Copy, Clone, Debug)]
 struct Aligner;
@@ -36,18 +34,13 @@ impl<T> DerefMut for Aligned<T> {
     }
 }
 
-pub const fn aligned<T>(value: T) -> Aligned<T> {
+/// Align a value
+pub const fn align<T>(value: T) -> Aligned<T> {
     Aligned { __: [], value }
 }
 
-impl Default for SendBuffer8 {
+impl Default for Aligned<[u64; 8]> {
     fn default() -> Self {
-        aligned([0u8; 64])
-    }
-}
-
-impl Default for SendBuffer64 {
-    fn default() -> Self {
-        aligned([0u64; 8])
+        align([0u64; 8])
     }
 }

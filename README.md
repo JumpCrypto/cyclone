@@ -2,7 +2,10 @@
 
 Assuming the FPGA image is loaded with `make reset`.
 
-Default SIZE=26.
+Note that this image `agfi-09bec09a9e2b4d332` has a fix to enable reading out points
+without DRAM, compared to the image `agfi-0d25a1d127f1b497f` of the ZPrize submission.
+
+Default SIZE=16.
 
 - `make points SIZE=<SIZE>` generates files `size<SIZE>.beta` and `size<SIZE>.points`.
 - `make column SIZE=<SIZE>` calculates a column MSM using these points.

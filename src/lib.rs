@@ -1,5 +1,5 @@
 pub mod app;
-pub use app::{App, Cmd};
+pub use app::{App, Command, Fpga, Packet};
 
 pub mod digits;
 pub use digits::{limb_carries, Digit, Limb, Scalar};
@@ -13,6 +13,15 @@ pub use timing::{always_timed, timed};
 use ark_bls12_377::{Fr, G1Affine, G1Projective};
 use ark_ec::AffineRepr as _;
 
+#[cfg(feature = "hw")]
+pub fn fpga() -> fpga::Result<Fpga> {
+    Fpga::new(0, 0x500)
+}
+#[cfg(not(feature = "hw"))]
+pub fn fpga() -> fpga::Result<Fpga> {
+    Ok(Fpga::new())
+}
+
 pub fn random_points(size: u8) -> Vec<G1Affine> {
     use rand_core::SeedableRng;
     let mut rng = rand::prelude::StdRng::from_entropy();
@@ -24,7 +33,6 @@ pub fn random_points(size: u8) -> Vec<G1Affine> {
             .collect()
     });
 
-    // use ark_ec::ProjectiveCurve;
     use ark_ec::CurveGroup as _;
     timed("batch converting to affine", || {
         G1Projective::normalize_batch(&points)

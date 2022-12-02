@@ -5,14 +5,14 @@
 use thiserror::Error;
 
 pub mod align;
-pub use align::{aligned, Aligned};
+pub use align::{align, Aligned};
 
 #[cfg(feature = "f1")]
 pub mod f1;
 #[cfg(feature = "f1")]
 pub use f1::F1;
 
-mod null;
+pub mod null;
 pub use null::Null;
 
 #[derive(Debug, Error)]
@@ -23,46 +23,91 @@ pub enum Error {
 
 pub type Result<T> = core::result::Result<T, Error>;
 
-pub type SendBuffer8 = Aligned<[u8; 64]>;
-pub type SendBuffer64 = Aligned<[u64; 8]>;
-
-#[allow(unused_variables)]
-pub trait Fpga {
-    // type Read: AsRef<[u8]>;
-    // type Write: AsMut<[u8]>;
-
-    fn read_register(&self, index: u32) -> u32;
-    /// NB: still using offset, not index
-    /// figure out if we need this
-    fn write_register(&mut self, index: u32, value: u32);
-
-    fn write8(&mut self, index: usize, buffer: &SendBuffer8) {}
-    fn write64(&mut self, index: usize, buffer: &SendBuffer64) {}
-
-    fn flush(&self) {}
-}
-
-pub trait ReadWrite<FPGA>: Sized {
-    fn new(fpga: FPGA, offset: u32, len: u32) -> Result<Self>;
-    fn read(&self, index: u32) -> u32;
-    fn write(&mut self, index: u32, value: u32);
-}
-
-pub trait Backoff<F> {
-    fn backoff(fpga: &mut F, offset: usize);
-}
-
-pub trait Streamable<'a, S: Stream<'a>, B: Backoff<Self>>: Sized {
-    fn stream(&'a mut self, offset: usize) -> S;
-}
-
-pub trait Stream<'a> {
-    type Packet;
-    fn write(&mut self, buffer: &Self::Packet);
+pub trait Flush {
+    /// flush communications
     fn flush(&mut self);
-    fn offset(&self) -> usize;
 }
 
-pub trait Write<Buffer>: Fpga {
-    fn write(&mut self, index: usize, buffer: &Buffer);
+pub trait Write<V>: Flush {
+    type Index: Copy;
+
+    /// write value to index
+    fn write(&mut self, index: Self::Index, value: &V);
+}
+
+pub trait ReadWrite<V>: Write<V> {
+
+    /// read value at index
+    fn read(&self, index: Self::Index) -> V;
+}
+
+pub trait Backoff<FPGA, I> {
+    fn backoff(fpga: &mut FPGA, offset: I);
+}
+
+pub struct Stream<'a, P, FPGA: Write<P>, B = null::Backoff> {
+    fpga: &'a mut FPGA,
+    offset: FPGA::Index,
+    backoff: core::marker::PhantomData<B>,
+}
+
+pub trait Streamable<'a, P, B: Backoff<Self, Self::Index> = null::Backoff>: Sized + Write<P> {
+    /// initialize new stream
+    fn stream(&'a mut self, offset: Self::Index) -> Stream<'a, P, Self, B>;
+}
+
+impl<'a, P, FPGA: Write<P>, B: Backoff<FPGA, FPGA::Index>> Streamable<'a, P, B> for FPGA {
+    fn stream(&'a mut self, offset: FPGA::Index) -> Stream<'a, P, FPGA, B> {
+        Stream {
+            fpga: self,
+            offset,
+            backoff: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, P, FPGA: Flush + Write<P>, B> Flush for Stream<'a, P, FPGA, B> {
+    fn flush(&mut self) {
+        self.fpga.flush()
+    }
+}
+
+pub trait Incrementable: Copy {
+    fn increment(&mut self);
+}
+
+impl Incrementable for u32 {
+    fn increment(&mut self) {
+        *self += 1;
+    }
+}
+
+impl Incrementable for usize {
+    fn increment(&mut self) {
+        *self += 1;
+    }
+}
+
+impl<'a, P, FPGA: Write<P>, B> Stream<'a, P, FPGA, B> {
+    pub fn fpga(&mut self) -> &mut FPGA {
+        self.fpga
+    }
+
+    #[inline(always)]
+    pub fn offset(&self) -> FPGA::Index {
+        self.offset
+    }
+}
+
+impl<'a, P, FPGA: Write<P>, B: Backoff<FPGA, FPGA::Index>> Stream<'a, P, FPGA, B>
+where
+    FPGA::Index: Incrementable
+{
+
+    #[inline(always)]
+    pub fn write(&mut self, packet: &P) {
+        self.fpga.write(self.offset, packet);
+        self.offset.increment();
+        B::backoff(self.fpga, self.offset);
+    }
 }
