@@ -42,6 +42,10 @@ cyclone-msm-points:
 install:
 	$(CARGO) install --path . --features demo
 
+git-install:
+	CARGO_NET_GIT_FETCH_WITH_CLI=true $(CARGO)install --features demo --git 'ssh://git@github.com/nickray/cyclone-msm.git'
+
+
 column: cyclone-msm-column
 	sudo $(COLUMN) $(SIZE) $(NAME)
 
