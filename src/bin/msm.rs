@@ -6,7 +6,7 @@ use cyclone_msm::{
     App,
 };
 
-#[path = "../src/examples-args.rs"]
+#[path = "../bin-lib/args.rs"]
 mod args;
 
 fn main() {

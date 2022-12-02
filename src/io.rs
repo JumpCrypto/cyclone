@@ -52,8 +52,9 @@ pub fn store<T: Sized>(data: &T, name: &str) {
 pub fn load<T: Sized>(data: &mut T, name: &str) {
     use std::io::Read as _;
     let size = std::mem::size_of::<T>();
+    println!("name: {}", name);
     std::fs::File::open(name)
-        .unwrap()
+        .unwrap_or_else(|_| panic!("no such file {}", name))
         .read_exact(unsafe { std::slice::from_raw_parts_mut(data as *mut T as *mut u8, size) })
         .unwrap();
     println!("load {}B from {}", size, name);

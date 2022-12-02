@@ -20,6 +20,7 @@ edition = "2021"
 [features]
 default = ["hw"]
 hw = ["fpga/f1"]
+demo = ["argh"]
 timings = []
 
 [dependencies]
@@ -36,6 +37,8 @@ rand = "0.8"
 rayon = { version = "1.5.3" }
 seq-macro = "0.3"
 
+argh = { version = "0.1", optional = true }
+
 [dev-dependencies]
 argh = "0.1"
 
@@ -50,3 +53,24 @@ required-features = ["hw"]
 [[example]]
 name = "sub"
 required-features = ["hw"]
+
+[[bin]]
+name = "cyclone-msm"
+path ="src/bin/msm.rs"
+required-features = ["demo"]
+
+[[bin]]
+name = "cyclone-msm-column"
+path ="src/bin/column.rs"
+required-features = ["demo"]
+
+[[bin]]
+name = "cyclone-msm-load"
+path ="src/bin/load.rs"
+required-features = ["demo"]
+
+[[bin]]
+name = "cyclone-msm-points"
+path ="src/bin/points.rs"
+required-features = ["demo"]
+

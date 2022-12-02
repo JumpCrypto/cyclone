@@ -5,6 +5,16 @@ Assuming the FPGA image is loaded with `make reset`.
 Note that this image `agfi-09bec09a9e2b4d332` has a fix to enable reading out points
 without DRAM, compared to the image `agfi-0d25a1d127f1b497f` of the ZPrize submission.
 
+## Quickstart
+
+Install the image: `sudo fpga-load-local-image -S 0 -I agfi-09bec09a9e2b4d332`
+Install the demo binaries: `cargo install --features cli cyclone-msm`
+Make some points: `cyclone-msm-points 16 /tmp/example-points`
+Load the points: `sudo --preserve-env=PATH cyclone-msm-load 16 /tmp/example-points`
+Run a random MSM on these points: `sudo --preserve-env=PATH cyclone-msm --preloaded 16 /tmp/example-points`
+
+## Development
+
 Default SIZE=16.
 
 - `make points SIZE=<SIZE>` generates files `size<SIZE>.beta` and `size<SIZE>.points`.

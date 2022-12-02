@@ -6,23 +6,29 @@ use cyclone_msm::{
     timing::timed,
 };
 
-fn main() {
-    let size = std::env::args()
-        .nth(1)
-        .expect("pass with SIZE argument")
-        .parse()
-        .expect("SIZE invalid as u8");
-    let len: usize = 1usize << size;
+#[derive(argh::FromArgs)]
+/// Arguments for tests
+pub struct Args {
+    /// size of instance
+    #[argh(positional)]
+    pub size: u8,
 
-    let name = std::env::args().nth(2).expect("pass with NAME argument");
+    /// prefix of filenames
+    #[argh(positional)]
+    pub name: String,
+}
+
+fn main() {
+    let args: Args = argh::from_env();
+    let len: usize = 1usize << args.size;
 
     // let data = harness(size as _);
     // msm_fpga::store(&data, "harness.bin");
     // let (points, digits, sum) = data;
-    let (beta, points) = harness_points(size);
+    let (beta, points) = harness_points(args.size);
 
-    let beta_name = format!("{}.beta", name);
-    let points_name = format!("{}.points", name);
+    let beta_name = format!("{}.beta", args.name);
+    let points_name = format!("{}.points", args.name);
 
     store(&beta, &beta_name);
     let mut beta_load = Fr::default();

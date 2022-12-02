@@ -7,7 +7,7 @@ use cyclone_msm::{
     App, Command, Packet,
 };
 
-#[path = "../src/examples-args.rs"]
+#[path = "../bin-lib/args.rs"]
 mod args;
 
 fn main() {
