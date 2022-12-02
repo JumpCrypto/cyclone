@@ -4,7 +4,7 @@ use core::ops::{Deref, DerefMut};
 #[derive(Copy, Clone, Debug)]
 struct Aligner;
 
-/// Aligns entries to 64 bytes (512 bit) boundaries.
+/// Aligns entries to 64 byte (512 bit) boundaries.
 pub struct Aligned<T> {
     // this 0-sized, 64-byte aligned entry aligns the entire struct
     __: [Aligner; 0],

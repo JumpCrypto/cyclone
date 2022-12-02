@@ -1,6 +1,10 @@
 use cyclone_msm::{
-    always_timed, fpga, harness_digits, load_beta, load_points, preprocess::into_weierstrass,
-    timed, App, Command, Packet,
+    bls12_377::into_weierstrass,
+    fpga,
+    io::{load_beta, load_points},
+    testing::harness_digits,
+    timing::{always_timed, timed},
+    App, Command, Packet,
 };
 
 #[path = "../src/examples-args.rs"]

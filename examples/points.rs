@@ -1,6 +1,10 @@
 use ark_bls12_377::Fr;
-use cyclone_msm::timed;
-use cyclone_msm::{harness_points, load, load_slice, store, store_slice, G1PTEAffine};
+use cyclone_msm::{
+    bls12_377::G1PTEAffine,
+    io::{load, load_slice, store, store_slice},
+    testing::harness_points,
+    timing::timed,
+};
 
 fn main() {
     let size = std::env::args()

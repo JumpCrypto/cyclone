@@ -1,4 +1,4 @@
-use cyclone_msm::{always_timed, fpga, load_points, App};
+use cyclone_msm::{fpga, io::load_points, timing::always_timed, App};
 
 #[path = "../src/examples-args.rs"]
 mod args;

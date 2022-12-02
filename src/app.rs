@@ -1,3 +1,4 @@
+//! Host-side app to interact with FPGA app.
 use core::iter;
 
 use ark_bls12_377::{Fq, G1Affine, G1TEProjective};
@@ -11,8 +12,10 @@ pub use fpga::Null as Fpga;
 pub use fpga::F1 as Fpga;
 
 use crate::{
-    digits::single_digit_carry, limb_carries, preprocess::into_weierstrass, timed, G1PTEAffine,
-    G1Projective, Scalar,
+    bls12_377::{into_weierstrass, G1PTEAffine},
+    precompute::{limb_carries, single_digit_carry},
+    timing::timed,
+    App, Command, G1Projective, Packet, Scalar,
 };
 
 const DDR_READ_LEN: u32 = 64;
@@ -25,7 +28,6 @@ const BACKOFF_THRESHOLD: u32 = 64;
 const SET_POINTS_FLUSH_EVERY: usize = 1024;
 const SET_DIGITS_FLUSH_BACKOFF_EVERY: usize = 512;
 
-pub type Packet = fpga::Aligned<[u64; 8]>;
 type FpgaStream<'a, B> = fpga::Stream<'a, Packet, Fpga, B>;
 
 fn shl_assign(point: &mut G1TEProjective, c: usize) {
@@ -46,12 +48,6 @@ pub enum Stream {
     // must start with Command::Start, then packets of Command::SetDigit
     Msm = 4 << 26,
     SetZero = 5 << 26,
-}
-
-#[repr(u64)]
-pub enum Command {
-    StartColumn = 1,
-    SetDigit = 3,
 }
 
 impl Command {
@@ -108,16 +104,9 @@ pub struct Statistics {
     pub ddr_read_count_channel_3: u32,
 }
 
-pub struct App {
-    pub fpga: Fpga,
-    len: usize,
-    pool: Option<rayon::ThreadPool>,
-    carried: Option<Vec<Scalar>>,
-}
-
 impl App {
     pub fn new(fpga: Fpga, size: u8) -> Self {
-        assert!(size < 32);
+        assert!(size <= 27);
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
             .build()

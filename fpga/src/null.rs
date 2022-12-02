@@ -1,6 +1,7 @@
 use crate::{Aligned, Flush, ReadWrite, Write};
 
 #[derive(Copy, Clone)]
+/// Mock FPGA, all writes are suppressed, all reads return default values.
 pub struct Null(());
 
 impl Null {
@@ -26,7 +27,9 @@ impl Write<u32> for Null {
 }
 
 impl ReadWrite<u32> for Null {
-    fn read(&self, _: u32) -> u32 { 0 }
+    fn read(&self, _: u32) -> u32 {
+        0
+    }
 }
 
 /// Null backoff
@@ -40,4 +43,3 @@ impl<T> Write<Aligned<T>> for Null {
 
     fn write(&mut self, _: usize, _: &Aligned<T>) {}
 }
-

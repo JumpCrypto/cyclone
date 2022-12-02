@@ -3,6 +3,7 @@ use crate::{Aligned, Error, Flush, ReadWrite, Result, Write};
 pub use fpga_sys as sys;
 
 #[derive(Copy, Clone)]
+/// AWS F1 FPGA.
 pub struct F1(());
 
 pub type Packet = Aligned<[u64; 8]>;
@@ -16,7 +17,6 @@ impl F1 {
             .then_some(Self(()))
             .ok_or(Error::SudoRequired)
     }
-
 }
 
 impl Flush for F1 {

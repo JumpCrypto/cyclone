@@ -1,4 +1,10 @@
-use cyclone_msm::{always_timed, fpga, harness_scalars, load_beta, load_points, App};
+use cyclone_msm::{
+    fpga,
+    io::{load_beta, load_points},
+    testing::harness_scalars,
+    timing::always_timed,
+    App,
+};
 
 #[path = "../src/examples-args.rs"]
 mod args;

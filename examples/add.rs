@@ -1,4 +1,6 @@
-use cyclone_msm::{preprocess::into_weierstrass, random_points, timed, App, Command};
+use cyclone_msm::{
+    bls12_377::into_weierstrass, testing::random_points, timing::timed, App, Command,
+};
 use fpga::f1::Packet;
 
 fn main() {

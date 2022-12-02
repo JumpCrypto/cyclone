@@ -1,6 +1,6 @@
-pub type Digit = i16;
-pub type Limb = u64;
-pub type Scalar = [Limb; 4];
+//! Scalar precomputation.
+
+use crate::Scalar;
 
 #[inline(always)]
 pub fn single_digit_carry(carried: &Scalar, i: usize, j: u8) -> i16 {
@@ -159,7 +159,7 @@ mod test {
     #[test]
     fn fast_digits() {
         let size = 16;
-        let mut scalars = crate::random_scalars(size);
+        let mut scalars = crate::testing::random_scalars(size);
 
         // add some edge cases
         scalars[0] = [u64::MAX, scalars[0][1], scalars[0][2], scalars[0][3]];

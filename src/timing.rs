@@ -1,3 +1,5 @@
+//! Timing utilities.
+
 use std::time::SystemTime;
 
 #[cfg(feature = "timings")]
