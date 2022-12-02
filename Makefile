@@ -1,6 +1,6 @@
 SIZE := 16
 # DIR := .
-DIR := /var/tmp/msm
+DIR := /var/tmp/cyclone-msm
 NAME := $(DIR)/size$(SIZE)
 # IMAGE := agfi-0d25a1d127f1b497f
 IMAGE := agfi-09bec09a9e2b4d332
@@ -12,13 +12,9 @@ endif
 FLAGS := --release $(NO_DEFAULT_FEATURES) --features demo
 
 CARGO := RUSTFLAGS='-C target-cpu=native' cargo
-# it seems `sudo -E` does *not* preserve PATH, which is what we want
-SUDO_CARGO := RUSTFLAGS='-C target-cpu=native' sudo --preserve-env=PATH cargo
+SUDO_CARGO := RUSTFLAGS='-C target-cpu=native' sudo $(shell command -v cargo)
 
-COLUMN = target/release/cyclone-msm-column
-LOAD = target/release/cyclone-msm-load
 MSM = target/release/cyclone-msm
-POINTS = target/release/cyclone-msm-points
 
 default: msm
 
@@ -30,40 +26,31 @@ basic:
 cyclone-msm:
 	$(CARGO) build $(FLAGS) --bin cyclone-msm
 
-cyclone-msm-column:
-	$(CARGO) build $(FLAGS) --bin cyclone-msm-column
-
-cyclone-msm-load:
-	$(CARGO) build $(FLAGS) --bin cyclone-msm-load
-
-cyclone-msm-points:
-	$(CARGO) build $(FLAGS) --bin cyclone-msm-points
-
 install:
 	$(CARGO) install --path . --features demo
 
 git-install:
-	CARGO_NET_GIT_FETCH_WITH_CLI=true $(CARGO)install --features demo --git 'ssh://git@github.com/nickray/cyclone-msm.git'
+	CARGO_NET_GIT_FETCH_WITH_CLI=true $(CARGO) install --features demo --git 'ssh://git@github.com/nickray/cyclone-msm.git'
 
 
-column: cyclone-msm-column
-	sudo $(COLUMN) $(SIZE) $(NAME)
+column: cyclone-msm
+	sudo $(MSM) $(SIZE) $(NAME) column
 
-column-pre: cyclone-msm-column
-	sudo $(COLUMN) --preloaded $(SIZE) $(NAME)
+column-pre: cyclone-msm
+	sudo $(MSM) --preloaded $(SIZE) $(NAME) column
 
-load: cyclone-msm-load
-	sudo $(LOAD) $(SIZE) $(NAME)
+load: cyclone-msm
+	sudo $(MSM) $(SIZE) $(NAME) load
 
 msm: cyclone-msm
-	sudo $(MSM) $(SIZE) $(NAME)
+	sudo $(MSM) $(SIZE) $(NAME) msm
 
 msm-pre: cyclone-msm
-	sudo $(MSM) --preloaded $(SIZE) $(NAME)
+	sudo $(MSM) --preloaded $(SIZE) $(NAME) msm
 
-points: cyclone-msm-points
+points: cyclone-msm
 	mkdir -p $(DIR)
-	$(POINTS) $(SIZE) $(NAME)
+	$(MSM) $(SIZE) $(NAME) points
 
 
 reset:

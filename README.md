@@ -7,11 +7,11 @@ without DRAM, compared to the image `agfi-0d25a1d127f1b497f` of the ZPrize submi
 
 ## Quickstart
 
-Install the image: `sudo fpga-load-local-image -S 0 -I agfi-09bec09a9e2b4d332`
-Install the demo binaries: `cargo install --features cli cyclone-msm`
-Make some points: `cyclone-msm-points 16 /tmp/example-points`
-Load the points: `sudo --preserve-env=PATH cyclone-msm-load 16 /tmp/example-points`
-Run a random MSM on these points: `sudo --preserve-env=PATH cyclone-msm --preloaded 16 /tmp/example-points`
+- Install the image: `sudo fpga-load-local-image -S 0 -I agfi-09bec09a9e2b4d332`
+- Install the demo binaries: `RUSTFLAGS='-C target-cpu=native' cargo install --features demo cyclone-msm`
+- Make some points: `cyclone-msm 16 /tmp/example-points points`
+- Load the points: `sudo $(command -v cyclone-msm 16) /tmp/example-points points`
+- Run a random MSM on these points: `sudo $(command -v cyclone-msm) --preloaded 16 /tmp/example-points msm`
 
 ## Development
 
@@ -40,4 +40,3 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
 be dual licensed as above, without any additional terms or conditions.
 </sub>
-

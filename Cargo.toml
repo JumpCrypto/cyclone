@@ -56,21 +56,5 @@ required-features = ["hw"]
 
 [[bin]]
 name = "cyclone-msm"
-path ="src/bin/msm.rs"
+path ="src/bin/demo.rs"
 required-features = ["demo"]
-
-[[bin]]
-name = "cyclone-msm-column"
-path ="src/bin/column.rs"
-required-features = ["demo"]
-
-[[bin]]
-name = "cyclone-msm-load"
-path ="src/bin/load.rs"
-required-features = ["demo"]
-
-[[bin]]
-name = "cyclone-msm-points"
-path ="src/bin/points.rs"
-required-features = ["demo"]
-
