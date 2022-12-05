@@ -1,6 +1,8 @@
 //! # fpga
 //!
-//! Rust bindings to interact with AWS F1 FPGAs.
+//! Rust traits to interact with FPGAs.
+//!
+//! Implemented for AWS F1 FPGAs.
 
 use thiserror::Error;
 
