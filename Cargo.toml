@@ -1,21 +1,24 @@
 [package]
 name = "cyclone-msm"
+edition = "2021"
+rust-version = "1.62"
 version = "0.1.0-pre"
+
 authors = [
     "Kaveh Aasaraai <kaasaraai@jumptrading.com>",
-    "Emanuele Cesena <ecesena@jumptrading.com>",
+    "Emanuele Cesena <ecesena@jumpcrypto.com>",
     "Rahul Maganti <rmaganti@jumpcrypto.com>",
     "Nicolas Stalder <nicolas@jumpcrypto.com>"
 ]
-description = "A benchmark library for finite fields and elliptic curves"
-homepage = "https://jumpcrypto.com"
-repository = "https://github.com/jumpcrypto/cyclone-msm"
+description = "FPGA-accelerated multi-scalar multiplication"
 documentation = "https://docs.rs/cyclone-msm"
-keywords = ["cryptography", "elliptic-curves", "fpga", "msm"]
-categories = ["cryptography"]
-include = ["Cargo.toml", "src", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]
+homepage = "https://jumpcrypto.com"
 license = "Apache-2.0 OR MIT"
-edition = "2021"
+repository = "https://github.com/jumpcrypto/cyclone-msm"
+readme = "README.md"
+
+categories = ["cryptography"]
+keywords = ["cryptography", "elliptic-curves", "fpga", "msm"]
 
 [features]
 default = ["hw"]
@@ -29,8 +32,8 @@ ark-ff = { version = "0.4.0-alpha.3", default-features = false }
 ark-bls12-377 = { version = "0.4.0-alpha.1" }
 ark-std = { version = "0.4.0-alpha", default-features = false }
 
+fpga = { package = "cyclone-fpga", path = "fpga", default-features = false }
 derivative = "2.2"
-fpga = { path = "fpga", default-features = false }
 hex = "0.4"
 rand_core = { version = "0.6", features = ["getrandom"] }
 rand = "0.8"

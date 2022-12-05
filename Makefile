@@ -1,6 +1,5 @@
 SIZE := 16
-# DIR := .
-DIR := /var/tmp/cyclone-msm
+DIR := /var/tmp/cyclone
 NAME := $(DIR)/size$(SIZE)
 # IMAGE := agfi-0d25a1d127f1b497f
 IMAGE := agfi-09bec09a9e2b4d332

@@ -1,9 +1,21 @@
 [package]
-name = "fpga-sys"
-version = "0.1.0"
+name = "cyclone-fpga-sys"
 edition = "2021"
+rust-version = "1.62"
+version = "0.1.0-pre"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = [
+    "Kaveh Aasaraai <kaasaraai@jumptrading.com>",
+    "Nicolas Stalder <nicolas@jumpcrypto.com>"
+]
+description = "FPGA driver C bindings"
+documentation = "https://docs.rs/cyclone-fpga-sys"
+homepage = "https://jumpcrypto.com"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/jumpcrypto/cyclone-msm"
+
+categories = ["hardware-support"]
+keywords = ["cryptography", "elliptic-curves", "fpga", "msm"]
 
 [dependencies]
 cty = "0.2"

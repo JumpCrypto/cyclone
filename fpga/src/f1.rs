@@ -1,6 +1,6 @@
 use crate::{Aligned, Error, Flush, ReadWrite, Result, Write};
 
-pub use fpga_sys as sys;
+pub use cyclone_fpga_sys as sys;
 
 #[derive(Copy, Clone)]
 /// AWS F1 FPGA.
