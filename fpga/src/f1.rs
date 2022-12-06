@@ -1,27 +1,95 @@
-use crate::{Aligned, Error, Flush, ReadWrite, Result, Write};
+use crate::{align::HalfAligned, Aligned, Error, Flush, ReadWrite, Result, Write};
 
-pub use cyclone_fpga_sys as sys;
+use core::arch::x86_64::{
+    // 256-bit SIMD register, requires avx
+    __m256i as u256,
+    _mm256_load_si256 as load_u256,
+    _mm256_stream_si256 as stream_u256,
+};
 
-#[derive(Copy, Clone)]
+use cyclone_f1_sys::{
+    c_void, fpga_pci_attach, fpga_pci_detach, fpga_pci_get_address, fpga_pci_peek, fpga_pci_poke,
+};
+
+#[derive(Clone)]
 /// AWS F1 FPGA.
-pub struct F1(());
+pub struct F1 {
+    ctrl_bar: i32,
+    ctrl_offset: u64,
+    stream_bar: i32,
+    stream_slice: &'static [u256],
+}
+
+impl Drop for F1 {
+    fn drop(&mut self) {
+        unsafe {
+            fpga_pci_detach(self.ctrl_bar);
+            fpga_pci_detach(self.stream_bar);
+        }
+    }
+}
 
 pub type Packet = Aligned<[u64; 8]>;
 
 pub type Stream<'a, B> = crate::Stream<'a, Packet, F1, B>;
 
+const FPGA_APP_PF: i32 = 0;
+const APP_PF_BAR0: i32 = 0;
+const APP_PF_BAR4: i32 = 4;
+const BURST_CAPABLE: u32 = 1;
+
 #[cfg(feature = "f1")]
 impl F1 {
-    pub fn new(slot: i32, offset: i32) -> Result<Self> {
-        (unsafe { sys::init_f1(slot, offset) } == 0)
-            .then_some(Self(()))
-            .ok_or(Error::SudoRequired)
+    pub fn new(
+        slot: i32,
+        ctrl_offset: usize,
+        stream_offset: usize,
+        stream_size: usize,
+    ) -> Result<Self> {
+        unsafe {
+            // fpga_pci_init does not actually do anything
+
+            let mut ctrl_bar = 0;
+            if 0 != fpga_pci_attach(slot, FPGA_APP_PF, APP_PF_BAR0, 0, &mut ctrl_bar) {
+                return Err(Error::SudoRequired);
+            }
+
+            let mut stream_bar = 0;
+            if 0 != fpga_pci_attach(
+                slot,
+                FPGA_APP_PF,
+                APP_PF_BAR4,
+                BURST_CAPABLE,
+                &mut stream_bar,
+            ) {
+                fpga_pci_detach(ctrl_bar);
+                return Err(Error::SudoRequired);
+            }
+
+            let mut stream_addr: *mut c_void = core::ptr::null_mut();
+            fpga_pci_get_address(
+                stream_bar,
+                stream_offset as u64,
+                stream_size as u64,
+                &mut stream_addr as *mut _,
+            );
+            let stream_slice = core::slice::from_raw_parts(stream_addr as *const u256, stream_size);
+
+            Ok(F1 {
+                ctrl_bar,
+                ctrl_offset: ctrl_offset as u64,
+                stream_bar,
+                stream_slice,
+            })
+        }
     }
 }
 
 impl Flush for F1 {
     fn flush(&mut self) {
-        unsafe { sys::write_flush() };
+        unsafe {
+            core::arch::x86_64::_mm_sfence();
+        }
     }
 }
 
@@ -29,15 +97,48 @@ impl Write<u32> for F1 {
     type Index = u32;
 
     fn write(&mut self, index: u32, value: &u32) {
-        let offset = index << 2;
-        unsafe { sys::write_32_f1(offset, *value) };
+        let offset = (2 << 30) | (index << 2);
+        unsafe {
+            // the other order does not work.
+            fpga_pci_poke(self.ctrl_bar, self.ctrl_offset + 4, *value);
+            fpga_pci_poke(self.ctrl_bar, self.ctrl_offset, offset);
+        }
     }
 }
 
 impl ReadWrite<u32> for F1 {
     fn read(&self, index: u32) -> u32 {
-        let offset = index << 2;
-        unsafe { sys::read_32_f1(offset) }
+        let offset = (1 << 30) | (index << 2);
+        let mut value = 0;
+        unsafe {
+            fpga_pci_poke(self.ctrl_bar, self.ctrl_offset, offset);
+            fpga_pci_peek(self.ctrl_bar, self.ctrl_offset, &mut value);
+        }
+        value
+    }
+}
+
+type HalfPacket = HalfAligned<[u64; 4]>;
+
+impl Packet {
+    #[inline(always)]
+    fn split(&self) -> (&HalfPacket, &HalfPacket) {
+        use core::mem::transmute;
+        unsafe { (transmute(&self.value[4]), transmute(&self.value[0])) }
+    }
+}
+
+impl Write<HalfPacket> for F1 {
+    type Index = usize;
+
+    fn write(&mut self, index: usize, packet: &HalfPacket) {
+        unsafe {
+            let register = load_u256(&packet[0] as *const u64 as *const u256);
+            stream_u256(
+                &self.stream_slice[index] as *const u256 as *mut u256,
+                register,
+            );
+        }
     }
 }
 
@@ -45,8 +146,8 @@ impl Write<Packet> for F1 {
     type Index = usize;
 
     fn write(&mut self, index: usize, packet: &Packet) {
-        let offset = index << 6;
-        let slice: &[u64] = &**packet;
-        unsafe { sys::write_512_f1(offset as u64, &slice[0] as *const _ as _) };
+        let (hi, lo) = packet.split();
+        self.write(2 * index, lo);
+        self.write(2 * index + 1, hi);
     }
 }

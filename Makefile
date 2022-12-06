@@ -11,16 +11,19 @@ endif
 FLAGS := --release $(NO_DEFAULT_FEATURES) --features demo
 
 CARGO := RUSTFLAGS='-C target-cpu=native' cargo
-SUDO_CARGO := RUSTFLAGS='-C target-cpu=native' sudo $(shell command -v cargo)
+# SUDO_CARGO := RUSTFLAGS='-C target-cpu=native' sudo $(shell command -v cargo)
 
 MSM = target/release/cyclone-msm
 
 default: msm
 
 basic:
-	$(SUDO_CARGO) run --release --example add
-	$(SUDO_CARGO) run --release --example neg
-	$(SUDO_CARGO) run --release --example sub
+	$(CARGO) build --release --example add
+	sudo target/release/examples/add
+	$(CARGO) build --release --example neg
+	sudo target/release/examples/neg
+	$(CARGO) build --release --example sub
+	sudo target/release/examples/sub
 
 cyclone-msm:
 	$(CARGO) build $(FLAGS) --bin cyclone-msm

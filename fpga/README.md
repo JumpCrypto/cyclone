@@ -1,12 +1,10 @@
-# fpga
+# cyclone-fpga
 
-Rust bindings to interact with AWS F1 FPGAs.
+Rust bindings to interact with FPGAs.
 
-Uses an abstraction implemented in `c/appxfer`.
+Implemented for AWS F1 and a Null instance.
 
-`fpga` contains the actual bindings.
-
-`fpga-sys` (in `sys/`) consists of `bindgen` bindings of the `fpga_libs`
+`f1-sys` consists of `bindgen` bindings of the `fpga_libs`
 from the directory `sdk/userspace` of the [aws/aws-fpga][aws-fpga] repo,
 which are included in `sys/c/upstream` to avoid git submodules.
 

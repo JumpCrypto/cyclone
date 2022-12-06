@@ -1,13 +1,24 @@
 use core::ops::{Deref, DerefMut};
 
+#[repr(align(32))]
+#[derive(Copy, Clone, Debug)]
+struct Align256;
+
 #[repr(align(64))]
 #[derive(Copy, Clone, Debug)]
-struct Aligner;
+struct Align512;
 
 /// Aligns entries to 64 byte (512 bit) boundaries.
 pub struct Aligned<T> {
     // this 0-sized, 64-byte aligned entry aligns the entire struct
-    __: [Aligner; 0],
+    __: [Align512; 0],
+    pub(crate) value: T,
+}
+
+/// Aligns entries to 64 byte (512 bit) boundaries.
+pub struct HalfAligned<T> {
+    // this 0-sized, 32-byte aligned entry aligns the entire struct
+    __: [Align256; 0],
     value: T,
 }
 
@@ -19,9 +30,17 @@ impl<T: Clone> Clone for Aligned<T> {
         }
     }
 }
+
 impl<T: Copy> Copy for Aligned<T> {}
 
 impl<T> Deref for Aligned<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T> Deref for HalfAligned<T> {
     type Target = T;
     fn deref(&self) -> &T {
         &self.value

@@ -19,9 +19,9 @@ categories = ["cryptography", "hardware-support"]
 keywords = ["cryptography", "elliptic-curves", "fpga", "msm"]
 
 [dependencies]
-cyclone-fpga-sys = { path = "sys", optional = true }
+cyclone-f1-sys = { version = "0.1.0-pre", path = "f1-sys", optional = true }
 thiserror = "1"
 
 [features]
 default = ["f1"]
-f1 = ["cyclone-fpga-sys"]
+f1 = ["cyclone-f1-sys"]
