@@ -57,7 +57,7 @@ pub type Scalar = [Limb; 4];
 /// FPGA constructor, independent of "hw" feature.
 #[cfg(feature = "hw")]
 pub fn fpga() -> fpga::Result<Fpga> {
-    Fpga::new(0, 0x500, 0, 0x100_000_000)
+    Fpga::new(0, 0x500, 0, 0x1_0000_0000)
 }
 #[cfg(not(feature = "hw"))]
 pub fn fpga() -> fpga::Result<Fpga> {

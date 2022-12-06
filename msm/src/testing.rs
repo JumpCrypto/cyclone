@@ -122,6 +122,56 @@ pub fn harness_points(size: u8) -> (Fr, Vec<G1PTEAffine>) {
     )
 }
 
+pub fn harness_fr(beta: &Fr, size: u8) -> (Vec<Fr>, G1Projective) {
+    use ark_std::{One, Zero};
+
+    let g = G1Affine::generator();
+
+    let scalars = random_fr(size as u8);
+
+    // calculate expected result "in the exponent"
+    // \Sum_i (scalar_i * beta^i)
+    let result = timed("SW MSM via betas", || {
+        let mut beta_i = Fr::one();
+        let mut prod = Fr::zero();
+        for &scalar in &scalars {
+            prod += scalar * beta_i;
+            beta_i *= beta;
+        }
+        g * prod
+    });
+
+    (scalars, result)
+}
+
+pub fn harness_bigints(beta: &Fr, size: u8) -> (Vec<ark_ff::BigInt<4>>, G1Projective) {
+    use ark_std::{One, Zero};
+
+    use ark_ff::PrimeField;
+    let g = G1Affine::generator();
+
+    let scalars = random_fr(size as u8);
+
+    // calculate expected result "in the exponent"
+    // \Sum_i (scalar_i * beta^i)
+    let result = timed("SW MSM via betas", || {
+        let mut beta_i = Fr::one();
+        let mut prod = Fr::zero();
+        for &scalar in &scalars {
+            prod += scalar * beta_i;
+            beta_i *= beta;
+        }
+        g * prod
+    });
+
+    let scalars: Vec<_> = scalars
+        .iter()
+        .map(|scalar| scalar.into_bigint())
+        .collect();
+
+    (scalars, result)
+}
+
 pub fn harness_scalars(beta: &Fr, size: u8) -> (Vec<Scalar>, G1Projective) {
     use ark_std::{One, Zero};
 

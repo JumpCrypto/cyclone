@@ -133,7 +133,11 @@ fn main() {
 
             let (scalars, sum) =
                 always_timed("generating test case", || harness_scalars(&beta, args.size));
-            let point = always_timed(&format!("MSM/{}", args.size), || app.msm(&scalars));
+            let point = always_timed(&format!("MSM/{}", args.size), || app.msm(scalars.iter()));
+
+            // let (scalars, sum) =
+            //     always_timed("generating test case", || cyclone_msm::testing::harness_bigints(&beta, args.size));
+            // let point = always_timed(&format!("MSM/{}", args.size), || app.msm_bigint(&scalars));
 
             if args.verbose {
                 println!("{:?}", app.statistics());

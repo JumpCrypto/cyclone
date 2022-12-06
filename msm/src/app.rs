@@ -1,7 +1,7 @@
 //! Host-side app to interact with FPGA app.
 use core::iter;
 
-use ark_bls12_377::{Fq, G1Affine, G1TEProjective};
+use ark_bls12_377::{Fq, Fr, G1Affine, G1TEProjective};
 use ark_std::Zero;
 
 use fpga::{null::Backoff as NullBackoff, Flush as _, ReadWrite as _, Streamable as _, Write as _};
@@ -127,20 +127,27 @@ impl App {
     }
 
     #[inline]
-    fn column(&mut self, i: usize, scalars: &[Scalar], total: &mut G1TEProjective) {
+    fn column<'a>(
+        &mut self,
+        i: usize,
+        scalars: impl Iterator<Item = &'a Scalar> + Clone + Send,
+        total: &mut G1TEProjective,
+    ) {
         let mut cmds = Packet::default();
         for j in (0..4).rev() {
             timed(&format!("\n:: column {}", j as usize), || {
                 let mut stream = self.start_column();
 
-                for chunk in scalars.chunks(8) {
-                    for (cmd, scalar) in cmds.iter_mut().zip(chunk) {
-                        let digit = single_digit_carry(scalar, i, j);
-                        *cmd = Command::set_digit(digit);
+                let mut k = 0;
+                for scalar in scalars.clone() {
+                    let digit = single_digit_carry(&scalar, i, j);
+                    cmds[k] = Command::set_digit(digit);
+                    k += 1;
+                    if k == 8 {
+                        stream.write(&cmds);
+                        k = 0;
                     }
-                    stream.write(&cmds);
                 }
-
                 *total += timed("fetching point", || self.get_point());
                 if (i, j) != (0, 0) {
                     shl_assign(total, 16);
@@ -151,7 +158,10 @@ impl App {
 
     /// Perform full MSM.
     #[inline]
-    pub fn msm(&mut self, scalars: &[Scalar]) -> G1Projective {
+    pub fn msm<'a>(
+        &mut self,
+        scalars: impl Iterator<Item = &'a Scalar> + Clone + ExactSizeIterator + Send,
+    ) -> G1Projective {
         assert_eq!(scalars.len(), self.len as _);
 
         let pool = self.pool.take().unwrap_or_else(|| unreachable!());
@@ -159,18 +169,22 @@ impl App {
 
         let mut total = G1TEProjective::zero();
         let mut total0 = G1TEProjective::zero();
+        let scalars_for_carry_calculation = scalars.clone();
+        let scalars_for_column_0_calculation = scalars.clone();
         pool.scope(|s| {
             s.spawn(|_| {
-                timed("limb carries", || limb_carries(scalars, &mut carried));
+                timed("limb carries", || {
+                    limb_carries(scalars_for_carry_calculation, &mut carried)
+                });
             });
 
             s.spawn(|_| {
-                self.column(0, scalars, &mut total0);
+                self.column(0, scalars_for_column_0_calculation, &mut total0);
             });
         });
 
         for i in (1..4).rev() {
-            self.column(i, &carried, &mut total);
+            self.column(i, carried.iter(), &mut total);
         }
 
         shl_assign(&mut total, 48);
@@ -180,6 +194,11 @@ impl App {
         self.pool = Some(pool);
         self.carried = Some(carried);
         total
+    }
+
+    /// Like `ark_ec::scalar_mul::variable_base::VariableBaseMSM::msm_bigint`
+    pub fn msm_bigint(&mut self, scalars: &[<Fr as ark_ff::PrimeField>::BigInt]) -> G1Projective {
+        self.msm(scalars.iter().map(|scalar| &scalar.0))
     }
 
     pub const fn len(&self) -> usize {

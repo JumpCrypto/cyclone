@@ -19,11 +19,14 @@ pub fn single_digit_carry(carried: &Scalar, i: usize, j: u8) -> i16 {
 }
 
 #[inline]
-pub fn limb_carries(scalars: &[Scalar], carried_limbs: &mut [Scalar]) {
+pub fn limb_carries<'a>(
+    scalars: impl Iterator<Item = &'a Scalar> + ExactSizeIterator + Send,
+    carried_limbs: &mut [Scalar],
+) {
     const HI: u16 = 1 << 15;
     debug_assert_eq!(scalars.len(), carried_limbs.len());
 
-    for (carried_limb, scalar) in carried_limbs.iter_mut().zip(scalars.iter()) {
+    for (carried_limb, scalar) in carried_limbs.iter_mut().zip(scalars) {
         let [mut s, mut u1, mut u2, mut u3] = scalar;
         let mut carry: bool;
 
