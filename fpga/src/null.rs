@@ -21,25 +21,21 @@ impl Flush for Null {
 }
 
 impl Write<u32> for Null {
-    type Index = u32;
-
-    fn write(&mut self, _: u32, _: &u32) {}
+    fn write(&mut self, _: usize, _: &u32) {}
 }
 
 impl ReadWrite<u32> for Null {
-    fn read(&self, _: u32) -> u32 {
+    fn read(&self, _: usize) -> u32 {
         0
     }
 }
 
 /// Null backoff
 pub struct Backoff;
-impl<F, I> crate::Backoff<F, I> for Backoff {
-    fn backoff(_: &mut F, _: I) {}
+impl<F> crate::Backoff<F> for Backoff {
+    fn backoff(_: &mut F, _: usize) {}
 }
 
 impl<T> Write<Aligned<T>> for Null {
-    type Index = usize;
-
     fn write(&mut self, _: usize, _: &Aligned<T>) {}
 }

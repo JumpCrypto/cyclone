@@ -31,7 +31,7 @@ impl Drop for F1 {
 
 pub type Packet = Aligned<[u64; 8]>;
 
-pub type Stream<'a, B> = crate::Stream<'a, Packet, F1, B>;
+pub type Stream<'a, B> = crate::Stream<'a, F1, B>;
 
 const FPGA_APP_PF: i32 = 0;
 const APP_PF_BAR0: i32 = 0;
@@ -94,24 +94,22 @@ impl Flush for F1 {
 }
 
 impl Write<u32> for F1 {
-    type Index = u32;
-
-    fn write(&mut self, index: u32, value: &u32) {
+    fn write(&mut self, index: usize, value: &u32) {
         let offset = (2 << 30) | (index << 2);
         unsafe {
             // the other order does not work.
             fpga_pci_poke(self.ctrl_bar, self.ctrl_offset + 4, *value);
-            fpga_pci_poke(self.ctrl_bar, self.ctrl_offset, offset);
+            fpga_pci_poke(self.ctrl_bar, self.ctrl_offset, offset as _);
         }
     }
 }
 
 impl ReadWrite<u32> for F1 {
-    fn read(&self, index: u32) -> u32 {
+    fn read(&self, index: usize) -> u32 {
         let offset = (1 << 30) | (index << 2);
         let mut value = 0;
         unsafe {
-            fpga_pci_poke(self.ctrl_bar, self.ctrl_offset, offset);
+            fpga_pci_poke(self.ctrl_bar, self.ctrl_offset, offset as _);
             fpga_pci_peek(self.ctrl_bar, self.ctrl_offset, &mut value);
         }
         value
@@ -129,8 +127,6 @@ impl Packet {
 }
 
 impl Write<HalfPacket> for F1 {
-    type Index = usize;
-
     fn write(&mut self, index: usize, packet: &HalfPacket) {
         unsafe {
             let register = load_u256(&packet[0] as *const u64 as *const u256);
@@ -143,9 +139,10 @@ impl Write<HalfPacket> for F1 {
 }
 
 impl Write<Packet> for F1 {
-    type Index = usize;
-
     fn write(&mut self, index: usize, packet: &Packet) {
+        // x86 doesn't support 512bit writes, but
+        // sometimes the two half-packets are combined into
+        // one TLP anyway.
         let (hi, lo) = packet.split();
         self.write(2 * index, lo);
         self.write(2 * index + 1, hi);

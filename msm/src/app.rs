@@ -140,7 +140,7 @@ impl App {
 
                 let mut k = 0;
                 for scalar in scalars.clone() {
-                    let digit = single_digit_carry(&scalar, i, j);
+                    let digit = single_digit_carry(scalar, i, j);
                     cmds[k] = Command::set_digit(digit);
                     k += 1;
                     if k == 8 {
@@ -170,7 +170,7 @@ impl App {
         let mut total = G1TEProjective::zero();
         let mut total0 = G1TEProjective::zero();
         let scalars_for_carry_calculation = scalars.clone();
-        let scalars_for_column_0_calculation = scalars.clone();
+        let scalars_for_column_0_calculation = scalars;
         pool.scope(|s| {
             s.spawn(|_| {
                 timed("limb carries", || {
@@ -361,7 +361,7 @@ impl App {
 }
 
 pub struct SetPointsBackoff;
-impl fpga::Backoff<Fpga, usize> for SetPointsBackoff {
+impl fpga::Backoff<Fpga> for SetPointsBackoff {
     #[inline(always)]
     fn backoff(fpga: &mut Fpga, offset: usize) {
         if (offset % SET_POINTS_FLUSH_EVERY) == 0 {
@@ -371,7 +371,7 @@ impl fpga::Backoff<Fpga, usize> for SetPointsBackoff {
 }
 
 pub struct DigitsBackoff;
-impl fpga::Backoff<Fpga, usize> for DigitsBackoff {
+impl fpga::Backoff<Fpga> for DigitsBackoff {
     #[inline(always)]
     fn backoff(fpga: &mut Fpga, offset: usize) {
         if (offset % SET_DIGITS_FLUSH_BACKOFF_EVERY) == 0 {

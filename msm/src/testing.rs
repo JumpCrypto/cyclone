@@ -164,10 +164,7 @@ pub fn harness_bigints(beta: &Fr, size: u8) -> (Vec<ark_ff::BigInt<4>>, G1Projec
         g * prod
     });
 
-    let scalars: Vec<_> = scalars
-        .iter()
-        .map(|scalar| scalar.into_bigint())
-        .collect();
+    let scalars: Vec<_> = scalars.iter().map(|scalar| scalar.into_bigint()).collect();
 
     (scalars, result)
 }

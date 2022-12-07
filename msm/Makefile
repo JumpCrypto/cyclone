@@ -3,6 +3,7 @@ DIR := /var/tmp/cyclone
 NAME := $(DIR)/size$(SIZE)
 # IMAGE := agfi-0d25a1d127f1b497f
 IMAGE := agfi-09bec09a9e2b4d332
+# IMAGE := agfi-0247e0259194e6ce0
 
 # deactivate the `hw` feature if SIM is set
 ifdef SIM
@@ -18,6 +19,8 @@ MSM = target/release/cyclone-msm
 default: msm
 
 basic:
+	$(CARGO) build --release --example identity
+	sudo target/release/examples/identity
 	$(CARGO) build --release --example add
 	sudo target/release/examples/add
 	$(CARGO) build --release --example neg

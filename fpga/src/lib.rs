@@ -4,6 +4,7 @@
 //!
 //! Implemented for AWS F1 FPGAs.
 
+use core::marker::PhantomData;
 use thiserror::Error;
 
 pub mod align;
@@ -33,21 +34,19 @@ pub trait Flush {
 
 /// Index-based writes to an FPGA.
 pub trait Write<V>: Flush {
-    type Index: Copy;
-
     /// write value to index
-    fn write(&mut self, index: Self::Index, value: &V);
+    fn write(&mut self, index: usize, value: &V);
 }
 
 /// Index-based read/writes to an FPGA.
 pub trait ReadWrite<V>: Write<V> {
     /// read value at index
-    fn read(&self, index: Self::Index) -> V;
+    fn read(&self, index: usize) -> V;
 }
 
 /// App-specific backoff mechanism used in streaming.
-pub trait Backoff<FPGA, I> {
-    fn backoff(fpga: &mut FPGA, offset: I);
+pub trait Backoff<FPGA> {
+    fn backoff(fpga: &mut FPGA, offset: usize);
 }
 
 /// Streaming writes to an FPGA.
@@ -55,24 +54,22 @@ pub trait Backoff<FPGA, I> {
 /// The backoff depends on the FPGA app's implementation of streaming.
 pub struct Stream<'a, P, FPGA: Write<P>, B = null::Backoff> {
     fpga: &'a mut FPGA,
-    offset: FPGA::Index,
-    backoff: core::marker::PhantomData<B>,
+    offset: usize,
+    __: PhantomData<(B, P)>,
 }
 
 /// Marker trait for FPGAs supporting streaming writes.
-pub trait Streamable<'a, P, B: Backoff<Self, Self::Index> = null::Backoff>:
-    Sized + Write<P>
-{
+pub trait Streamable<'a, P, B: Backoff<Self> = null::Backoff>: Sized + Write<P> {
     /// initialize new stream
-    fn stream(&'a mut self, offset: Self::Index) -> Stream<'a, P, Self, B>;
+    fn stream(&'a mut self, offset: usize) -> Stream<'a, P, Self, B>;
 }
 
-impl<'a, P, FPGA: Write<P>, B: Backoff<FPGA, FPGA::Index>> Streamable<'a, P, B> for FPGA {
-    fn stream(&'a mut self, offset: FPGA::Index) -> Stream<'a, P, FPGA, B> {
+impl<'a, P, FPGA: Write<P>, B: Backoff<FPGA>> Streamable<'a, P, B> for FPGA {
+    fn stream(&'a mut self, offset: usize) -> Stream<'a, P, FPGA, B> {
         Stream {
             fpga: self,
             offset,
-            backoff: core::marker::PhantomData,
+            __: PhantomData,
         }
     }
 }
@@ -83,48 +80,22 @@ impl<'a, P, FPGA: Flush + Write<P>, B> Flush for Stream<'a, P, FPGA, B> {
     }
 }
 
-/// Helper trait to keep track of index offsets in streaming.
-pub trait Incrementable: Copy {
-    fn increment(&mut self);
-}
-
-impl Incrementable for u32 {
-    fn increment(&mut self) {
-        *self += 1;
-    }
-}
-
-impl Incrementable for u64 {
-    fn increment(&mut self) {
-        *self += 1;
-    }
-}
-
-impl Incrementable for usize {
-    fn increment(&mut self) {
-        *self += 1;
-    }
-}
-
 impl<'a, P, FPGA: Write<P>, B> Stream<'a, P, FPGA, B> {
     pub fn fpga(&mut self) -> &mut FPGA {
         self.fpga
     }
 
     #[inline(always)]
-    pub fn offset(&self) -> FPGA::Index {
+    pub fn offset(&self) -> usize {
         self.offset
     }
 }
 
-impl<'a, P, FPGA: Write<P>, B: Backoff<FPGA, FPGA::Index>> Stream<'a, P, FPGA, B>
-where
-    FPGA::Index: Incrementable,
-{
+impl<'a, P, FPGA: Write<P>, B: Backoff<FPGA>> Stream<'a, P, FPGA, B> {
     #[inline(always)]
     pub fn write(&mut self, packet: &P) {
         self.fpga.write(self.offset, packet);
-        self.offset.increment();
+        self.offset += 1;
         B::backoff(self.fpga, self.offset);
     }
 }
