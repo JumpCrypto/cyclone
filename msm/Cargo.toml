@@ -27,10 +27,10 @@ demo = ["argh"]
 timings = []
 
 [dependencies]
-ark-ec = { version = "0.4.0-alpha.1", default-features = false }
-ark-ff = { version = "0.4.0-alpha.3", default-features = false }
-ark-bls12-377 = { version = "0.4.0-alpha.1" }
-ark-std = { version = "0.4.0-alpha", default-features = false }
+ark-ec = { version = "=0.4.0-alpha.4", default-features = false }
+ark-ff = { version = "=0.4.0-alpha.5", default-features = false }
+ark-bls12-377 = { version = "=0.4.0-alpha.1" }
+ark-std = { version = "=0.4.0-alpha", default-features = false }
 
 fpga = { package = "cyclone-fpga", path = "../fpga", default-features = false }
 derivative = "2.2"
