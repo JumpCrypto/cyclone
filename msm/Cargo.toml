@@ -14,7 +14,7 @@ description = "FPGA-accelerated multi-scalar multiplication"
 documentation = "https://docs.rs/cyclone-msm"
 homepage = "https://jumpcrypto.com"
 license = "Apache-2.0 OR MIT"
-repository = "https://github.com/jumpcrypto/cyclone-msm"
+repository = "https://github.com/jumpcrypto/cyclone"
 readme = "README.md"
 
 categories = ["cryptography"]
