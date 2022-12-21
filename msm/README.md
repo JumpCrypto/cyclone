@@ -7,11 +7,27 @@ without DRAM, compared to the image `agfi-0d25a1d127f1b497f` of the ZPrize submi
 
 ## Quickstart
 
-- Install the image: `sudo fpga-load-local-image -S 0 -I agfi-09bec09a9e2b4d332`
-- Install the demo binaries: `RUSTFLAGS='-C target-cpu=native' cargo install --features demo cyclone-msm`
-- Make some points: `cyclone-msm 16 /tmp/example-points points`
-- Load the points: `sudo $(command -v cyclone-msm 16) /tmp/example-points points`
-- Run a random MSM on these points: `sudo $(command -v cyclone-msm) --preloaded 16 /tmp/example-points msm`
+```
+# install the demo binaries
+RUSTFLAGS='-C target-feature=+avx2' cargo install --features demo --git https://github.com/jumpcrypto/cyclone cyclone-msm
+
+# load the FPGA image
+sudo fpga-load-local-image -S 0 -I agfi-09bec09a9e2b4d332
+
+# configure the demo (SIZE can be up to 26)
+SIZE=16 LOCATION=/tmp/example-points-$SIZE
+CYCLONE=$(command -v cyclone-msm)
+
+# make some points
+$CYCLONE $SIZE $LOCATION points
+
+# load the points
+sudo $CYCLONE $SIZE $LOCATION load
+
+# run a random MSM on these points
+sudo $CYCLONE --preloaded $SIZE $LOCATION msm
+
+```
 
 ## Development
 
