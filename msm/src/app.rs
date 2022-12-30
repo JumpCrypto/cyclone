@@ -107,14 +107,9 @@ pub struct Statistics {
 impl App {
     pub fn new(fpga: Fpga, size: u8) -> Self {
         assert!(size <= 27);
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(2)
-            .build()
-            .unwrap();
         let mut app = App {
             fpga,
             len: 1 << size,
-            pool: Some(pool),
             carried: Some(vec![Scalar::default(); 1 << size]),
         };
         app.set_size();
@@ -164,23 +159,17 @@ impl App {
     ) -> G1Projective {
         assert_eq!(scalars.len(), self.len as _);
 
-        let pool = self.pool.take().unwrap_or_else(|| unreachable!());
         let mut carried = self.carried.take().unwrap_or_else(|| unreachable!());
 
         let mut total = G1TEProjective::zero();
         let mut total0 = G1TEProjective::zero();
-        let scalars_for_carry_calculation = scalars.clone();
-        let scalars_for_column_0_calculation = scalars;
-        pool.scope(|s| {
-            s.spawn(|_| {
-                timed("limb carries", || {
-                    limb_carries(scalars_for_carry_calculation, &mut carried)
-                });
+        std::thread::scope(|s| {
+            s.spawn({
+                let scalars = scalars.clone();
+                || timed("limb carries", || limb_carries(scalars, &mut carried))
             });
 
-            s.spawn(|_| {
-                self.column(0, scalars_for_column_0_calculation, &mut total0);
-            });
+            s.spawn(|| self.column(0, scalars, &mut total0));
         });
 
         for i in (1..4).rev() {
@@ -191,7 +180,6 @@ impl App {
         total += total0;
 
         let total = into_weierstrass(&total);
-        self.pool = Some(pool);
         self.carried = Some(carried);
         total
     }
