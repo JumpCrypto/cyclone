@@ -33,7 +33,6 @@ use ark_bls12_377::{Fr, G1Projective};
 pub struct App {
     pub fpga: Fpga,
     len: usize,
-    pool: Option<rayon::ThreadPool>,
     carried: Option<Vec<Scalar>>,
 }
 
